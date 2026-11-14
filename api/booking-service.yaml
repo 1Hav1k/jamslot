@@ -1,0 +1,536 @@
+openapi: 3.1.0
+info:
+  title: booking-service
+  version: 1.0.0
+  summary: Бронирование комнат JamSlot
+  description: >-
+    Бронирование временных интервалов в комнатах: удержание интервала на 15 минут,
+    жизненный цикл брони и координация саги «бронь → резерв оборудования → платёж».
+    Сервис публикует события booking.* и команду payment.refund (см. asyncapi.yaml).
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8000
+    description: API Gateway (внешние эндпоинты /api/v1/**)
+tags:
+  - name: public
+    description: Эндпоинты для клиентских приложений, доступны через API Gateway
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/bookings:
+    post:
+      tags: [public]
+      operationId: createBooking
+      summary: Создать бронь и удержать интервал на 15 минут
+      description: >-
+        Запускает сагу бронирования. Сервис синхронно получает расчёт у venue-service,
+        сохраняет бронь в статусе PENDING_PAYMENT (пересечение интервалов исключает ограничение
+        EXCLUDE в PostgreSQL), резервирует оборудование в equipment-service и создаёт платёж в
+        payment-service. Если один из шагов не удался, бронь отменяется, а уже выполненные
+        шаги компенсируются событием booking.cancelled.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateBookingRequest' }
+            example:
+              roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+              startsAt: '2026-11-20T18:00:00+03:00'
+              endsAt: '2026-11-20T20:00:00+03:00'
+              equipment:
+                - { itemId: e7b1d2c3-4a5f-4b6c-8d7e-9f0a1b2c3d4e, quantity: 1 }
+              comment: Нужна стойка для клавиш
+      responses:
+        '201':
+          description: Бронь создана и ожидает оплаты
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+              example:
+                id: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                venueName: Гараж 61
+                roomName: Комната «Красная»
+                startsAt: '2026-11-20T18:00:00+03:00'
+                endsAt: '2026-11-20T20:00:00+03:00'
+                status: PENDING_PAYMENT
+                equipment:
+                  - itemId: e7b1d2c3-4a5f-4b6c-8d7e-9f0a1b2c3d4e
+                    name: Fender Stratocaster
+                    quantity: 1
+                    price: 600.00
+                roomPrice: 1400.00
+                equipmentPrice: 600.00
+                totalPrice: 2000.00
+                currency: RUB
+                paymentId: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+                paymentUrl: https://yoomoney.ru/checkout/payments/v2/contract?orderId=2f1c9a7e-000f-5000-9000-1b2c3d4e5f60
+                expiresAt: '2026-11-13T19:15:00+03:00'
+                cancelReason: null
+                createdAt: '2026-11-13T19:00:00+03:00'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Интервал уже занят или не хватает оборудования
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              examples:
+                slotTaken:
+                  summary: Интервал пересекается с другой бронью
+                  value:
+                    type: urn:jamslot:problem:slot-already-taken
+                    title: Интервал уже занят
+                    status: 409
+                    code: SLOT_ALREADY_TAKEN
+                    detail: Комната занята с 18:00 до 19:00
+                equipmentUnavailable:
+                  summary: Оборудование на этот интервал уже занято
+                  value:
+                    type: urn:jamslot:problem:equipment-unavailable
+                    title: Оборудование недоступно
+                    status: 409
+                    code: EQUIPMENT_UNAVAILABLE
+                    detail: Fender Stratocaster — свободно 0 из 1
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    get:
+      tags: [public]
+      operationId: listBookings
+      summary: Список броней
+      description: >-
+        Клиент видит только свои брони. Менеджер площадки может передать venueId и получить
+        брони своей площадки.
+      parameters:
+        - in: query
+          name: status
+          description: Фильтр по статусу
+          schema: { $ref: '#/components/schemas/BookingStatus' }
+          example: CONFIRMED
+        - in: query
+          name: venueId
+          description: Брони площадки (только для роли venue_manager)
+          schema: { type: string, format: uuid }
+          example: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Страница списка броней
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingPage' }
+              example:
+                items:
+                  - id: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                    userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                    roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                    venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                    venueName: Гараж 61
+                    roomName: Комната «Красная»
+                    startsAt: '2026-11-20T18:00:00+03:00'
+                    endsAt: '2026-11-20T20:00:00+03:00'
+                    status: CONFIRMED
+                    equipment: []
+                    roomPrice: 1400.00
+                    equipmentPrice: 0
+                    totalPrice: 1400.00
+                    currency: RUB
+                    paymentId: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+                    paymentUrl: null
+                    expiresAt: null
+                    cancelReason: null
+                    createdAt: '2026-11-13T19:00:00+03:00'
+                page: { page: 0, size: 20, totalElements: 1, totalPages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/bookings/{bookingId}:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    get:
+      tags: [public]
+      operationId: getBooking
+      summary: Получить бронь
+      description: Клиент опрашивает этот эндпоинт после возврата со страницы оплаты, пока статус не сменится с PENDING_PAYMENT.
+      responses:
+        '200':
+          description: Бронь
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+              example:
+                id: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                venueName: Гараж 61
+                roomName: Комната «Красная»
+                startsAt: '2026-11-20T18:00:00+03:00'
+                endsAt: '2026-11-20T20:00:00+03:00'
+                status: CONFIRMED
+                equipment:
+                  - itemId: e7b1d2c3-4a5f-4b6c-8d7e-9f0a1b2c3d4e
+                    name: Fender Stratocaster
+                    quantity: 1
+                    price: 600.00
+                roomPrice: 1400.00
+                equipmentPrice: 600.00
+                totalPrice: 2000.00
+                currency: RUB
+                paymentId: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+                paymentUrl: null
+                expiresAt: null
+                cancelReason: null
+                createdAt: '2026-11-13T19:00:00+03:00'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/bookings/{bookingId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    post:
+      tags: [public]
+      operationId: cancelBooking
+      summary: Отменить бронь
+      description: >-
+        Отменяет бронь в статусе PENDING_PAYMENT или CONFIRMED. Сервис публикует booking.cancelled
+        (резерв оборудования снимается, неоплаченный платёж отменяется). Для оплаченной брони
+        дополнительно отправляется команда payment.refund: за 24 часа и более до начала возвращается
+        вся сумма, позже — возврат не делается. Деньги возвращаются асинхронно.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelBookingRequest' }
+            example:
+              comment: Перенесли репетицию
+      responses:
+        '200':
+          description: Бронь отменена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+              example:
+                id: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                venueName: Гараж 61
+                roomName: Комната «Красная»
+                startsAt: '2026-11-20T18:00:00+03:00'
+                endsAt: '2026-11-20T20:00:00+03:00'
+                status: CANCELLED
+                equipment: []
+                roomPrice: 1400.00
+                equipmentPrice: 0
+                totalPrice: 1400.00
+                currency: RUB
+                paymentId: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+                paymentUrl: null
+                expiresAt: null
+                cancelReason: USER_REQUEST
+                createdAt: '2026-11-13T19:00:00+03:00'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Бронь в текущем статусе отменить нельзя
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: urn:jamslot:problem:booking-not-cancellable
+                title: Бронь нельзя отменить
+                status: 409
+                code: BOOKING_NOT_CANCELLABLE
+                detail: Бронь уже завершена
+  /api/v1/occupancy/rooms/{roomId}:
+    parameters:
+      - in: path
+        name: roomId
+        required: true
+        description: Идентификатор комнаты
+        schema: { type: string, format: uuid }
+        example: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+    get:
+      tags: [public]
+      operationId: getRoomOccupancy
+      summary: Занятые интервалы комнаты на дату
+      description: >-
+        Возвращает интервалы, занятые бронями в статусах PENDING_PAYMENT и CONFIRMED.
+        Клиент накладывает их на часы работы площадки из venue-service и показывает свободное время.
+        Доступен без авторизации.
+      security: []
+      parameters:
+        - in: query
+          name: date
+          required: true
+          description: Дата в часовом поясе площадки
+          schema: { type: string, format: date }
+          example: '2026-11-20'
+      responses:
+        '200':
+          description: Занятость комнаты
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomOccupancy' }
+              example:
+                roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                date: '2026-11-20'
+                busy:
+                  - { startsAt: '2026-11-20T12:00:00+03:00', endsAt: '2026-11-20T15:00:00+03:00' }
+                  - { startsAt: '2026-11-20T18:00:00+03:00', endsAt: '2026-11-20T20:00:00+03:00' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+components:
+  parameters:
+    BookingId:
+      in: path
+      name: bookingId
+      required: true
+      description: Идентификатор брони
+      schema: { type: string, format: uuid }
+      example: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      description: >-
+        Ключ идемпотентности (UUID). Повтор запроса с тем же ключом возвращает
+        результат первого запроса и не создаёт дубль. Ключ хранится 24 часа.
+      schema: { type: string, format: uuid }
+      example: 7c1f0a52-3b7e-4d0e-9a41-2f6d8c5b1e90
+    Page:
+      in: query
+      name: page
+      description: Номер страницы, начиная с 0
+      schema: { type: integer, minimum: 0, default: 0 }
+      example: 0
+    Size:
+      in: query
+      name: size
+      description: Размер страницы
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      example: 20
+  schemas:
+    BookingStatus:
+      type: string
+      description: >-
+        PENDING_PAYMENT — интервал удержан, ждём оплату; CONFIRMED — оплачена;
+        CANCELLED — отменена клиентом, менеджером или сагой; EXPIRED — не оплачена за 15 минут;
+        COMPLETED — время брони прошло.
+      enum: [PENDING_PAYMENT, CONFIRMED, CANCELLED, EXPIRED, COMPLETED]
+    CancelReason:
+      type: string
+      enum: [USER_REQUEST, MANAGER_REQUEST, PAYMENT_FAILED, EQUIPMENT_UNAVAILABLE, PAYMENT_UNAVAILABLE]
+    EquipmentOrderLine:
+      type: object
+      required: [itemId, quantity]
+      properties:
+        itemId: { type: string, format: uuid, description: Позиция оборудования из equipment-service }
+        quantity: { type: integer, minimum: 1, maximum: 10 }
+    CreateBookingRequest:
+      type: object
+      required: [roomId, startsAt, endsAt]
+      properties:
+        roomId: { type: string, format: uuid }
+        startsAt: { type: string, format: date-time, description: 'Начало, кратно часу' }
+        endsAt: { type: string, format: date-time, description: 'Конец, кратен часу' }
+        equipment:
+          type: array
+          maxItems: 10
+          description: Оборудование в аренду на время брони (необязательно)
+          items: { $ref: '#/components/schemas/EquipmentOrderLine' }
+        comment: { type: string, maxLength: 500 }
+    CancelBookingRequest:
+      type: object
+      properties:
+        comment: { type: string, maxLength: 500 }
+    BookingEquipmentLine:
+      type: object
+      description: Снимок арендованной позиции на момент бронирования
+      required: [itemId, name, quantity, price]
+      properties:
+        itemId: { type: string, format: uuid }
+        name: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        price: { type: number, minimum: 0, description: Стоимость позиции за весь интервал }
+    Booking:
+      type: object
+      required: [id, userId, roomId, venueId, venueName, roomName, startsAt, endsAt, status, equipment, roomPrice, equipmentPrice, totalPrice, currency, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid, description: Идентификатор пользователя в Keycloak (sub) }
+        roomId: { type: string, format: uuid }
+        venueId: { type: string, format: uuid }
+        venueName: { type: string, description: Снимок названия площадки }
+        roomName: { type: string, description: Снимок названия комнаты }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/BookingStatus' }
+        equipment:
+          type: array
+          items: { $ref: '#/components/schemas/BookingEquipmentLine' }
+        roomPrice: { type: number, minimum: 0 }
+        equipmentPrice: { type: number, minimum: 0 }
+        totalPrice: { type: number, minimum: 0 }
+        currency: { type: string, enum: [RUB] }
+        paymentId: { type: [string, 'null'], format: uuid }
+        paymentUrl:
+          type: [string, 'null']
+          format: uri
+          description: Ссылка на страницу оплаты, заполнена только в статусе PENDING_PAYMENT
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: До какого момента удерживается интервал, заполнено только в статусе PENDING_PAYMENT
+        cancelReason:
+          oneOf:
+            - $ref: '#/components/schemas/CancelReason'
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+    BookingPage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Booking' }
+        page: { $ref: '#/components/schemas/PageMeta' }
+    BusyInterval:
+      type: object
+      required: [startsAt, endsAt]
+      properties:
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+    RoomOccupancy:
+      type: object
+      required: [roomId, date, busy]
+      properties:
+        roomId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        busy:
+          type: array
+          items: { $ref: '#/components/schemas/BusyInterval' }
+    Problem:
+      type: object
+      description: >-
+        Единая модель ошибки для всех сервисов JamSlot (RFC 9457 Problem Details).
+        Поле code — машиночитаемый код, по которому клиент выбирает поведение.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, description: Идентификатор типа ошибки }
+        title: { type: string, description: Краткое описание типа ошибки }
+        status: { type: integer, description: HTTP-код ответа }
+        code: { type: string, description: Машиночитаемый код ошибки }
+        detail: { type: string, description: Пояснение для конкретного случая }
+        instance: { type: string, description: 'Путь запроса, на котором возникла ошибка' }
+        traceId: { type: string, description: Идентификатор трассировки (X-Correlation-Id) }
+        errors:
+          type: array
+          description: Ошибки по отдельным полям (только для ошибок валидации)
+          items: { $ref: '#/components/schemas/FieldError' }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+    PageMeta:
+      type: object
+      description: Сведения о странице списка
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1 }
+        totalElements: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Запрос не прошёл валидацию
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:validation-error
+            title: Некорректный запрос
+            status: 400
+            code: VALIDATION_ERROR
+            detail: Одно или несколько полей заполнены неверно
+            traceId: 0b9d6c1e-52a4-4f3b-8e77-1c2d3e4f5a6b
+            errors:
+              - { field: size, message: должно быть не больше 100 }
+    Unauthorized:
+      description: Токен отсутствует, просрочен или не прошёл проверку
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:unauthorized
+            title: Требуется авторизация
+            status: 401
+            code: UNAUTHORIZED
+            detail: Access-токен отсутствует или просрочен
+    Forbidden:
+      description: Недостаточно прав для операции
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:forbidden
+            title: Доступ запрещён
+            status: 403
+            code: FORBIDDEN
+            detail: Операция доступна только владельцу ресурса или менеджеру площадки
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:not-found
+            title: Ресурс не найден
+            status: 404
+            code: NOT_FOUND
+            detail: Объект с указанным идентификатором не существует
+    UnprocessableEntity:
+      description: Запрос корректен по форме, но нарушает бизнес-правило
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:business-rule-violation
+            title: Нарушено бизнес-правило
+            status: 422
+            code: BUSINESS_RULE_VIOLATION
+            detail: Интервал выходит за часы работы площадки
+    ServiceUnavailable:
+      description: Сервис или его зависимость временно недоступны, запрос можно повторить
+      headers:
+        Retry-After:
+          description: Через сколько секунд повторить запрос
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:service-unavailable
+            title: Сервис временно недоступен
+            status: 503
+            code: SERVICE_UNAVAILABLE
+            detail: Зависимый сервис не ответил за отведённое время
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access-токен пользователя, выданный Keycloak (realm jamslot). Проверяется на API Gateway.

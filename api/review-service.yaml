@@ -1,0 +1,305 @@
+openapi: 3.1.0
+info:
+  title: review-service
+  version: 1.0.0
+  summary: Отзывы и рейтинг площадок JamSlot
+  description: >-
+    Отзывы о площадках после состоявшихся репетиций и расчёт рейтинга. Право оставить отзыв
+    сервис проверяет по собственной копии завершённых броней, которую наполняет из событий
+    booking.completed, — синхронных вызовов к booking-service нет. Сервис публикует события
+    review.published и review.removed (см. asyncapi.yaml).
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8000
+    description: API Gateway (внешние эндпоинты /api/v1/**)
+tags:
+  - name: public
+    description: Эндпоинты для клиентских приложений, доступны через API Gateway
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/reviews:
+    get:
+      tags: [public]
+      operationId: listReviews
+      summary: Отзывы о площадке
+      security: []
+      parameters:
+        - in: query
+          name: venueId
+          required: true
+          description: Площадка
+          schema: { type: string, format: uuid }
+          example: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+        - in: query
+          name: roomId
+          description: Только отзывы о конкретной комнате
+          schema: { type: string, format: uuid }
+          example: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Страница списка отзывов, сначала новые
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewPage' }
+              example:
+                items:
+                  - id: 6e5d4c3b-2a19-4f08-b7c6-d5e4f3a2b1c0
+                    bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                    venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                    roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                    authorId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                    authorName: Илья
+                    rating: 5
+                    text: Хороший звук в комнате, барабаны настроены, админ помог с коммутацией.
+                    status: PUBLISHED
+                    createdAt: '2026-11-20T21:10:00+03:00'
+                page: { page: 0, size: 20, totalElements: 1, totalPages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    post:
+      tags: [public]
+      operationId: createReview
+      summary: Оставить отзыв о завершённой брони
+      description: Один отзыв на одну бронь. Отзыв может оставить только автор брони после её завершения.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReviewRequest' }
+            example:
+              bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+              rating: 5
+              text: Хороший звук в комнате, барабаны настроены, админ помог с коммутацией.
+      responses:
+        '201':
+          description: Отзыв опубликован
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+              example:
+                id: 6e5d4c3b-2a19-4f08-b7c6-d5e4f3a2b1c0
+                bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                authorId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                authorName: Илья
+                rating: 5
+                text: Хороший звук в комнате, барабаны настроены, админ помог с коммутацией.
+                status: PUBLISHED
+                createdAt: '2026-11-20T21:10:00+03:00'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Отзыв на эту бронь уже оставлен
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: urn:jamslot:problem:review-already-exists
+                title: Отзыв уже существует
+                status: 409
+                code: REVIEW_ALREADY_EXISTS
+                detail: На одну бронь можно оставить один отзыв
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/reviews/{reviewId}:
+    parameters:
+      - in: path
+        name: reviewId
+        required: true
+        description: Идентификатор отзыва
+        schema: { type: string, format: uuid }
+        example: 6e5d4c3b-2a19-4f08-b7c6-d5e4f3a2b1c0
+    get:
+      tags: [public]
+      operationId: getReview
+      summary: Получить отзыв
+      security: []
+      responses:
+        '200':
+          description: Отзыв
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+              example:
+                id: 6e5d4c3b-2a19-4f08-b7c6-d5e4f3a2b1c0
+                bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                authorId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                authorName: Илья
+                rating: 5
+                text: Хороший звук в комнате, барабаны настроены, админ помог с коммутацией.
+                status: PUBLISHED
+                createdAt: '2026-11-20T21:10:00+03:00'
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [public]
+      operationId: removeReview
+      summary: Удалить отзыв
+      description: >-
+        Доступно автору отзыва и администратору платформы (модерация). Отзыв переходит в статус
+        REMOVED, рейтинг площадки пересчитывается. Повторное удаление возвращает 204.
+      responses:
+        '204':
+          description: Отзыв удалён
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      description: >-
+        Ключ идемпотентности (UUID). Повтор запроса с тем же ключом возвращает
+        результат первого запроса и не создаёт дубль. Ключ хранится 24 часа.
+      schema: { type: string, format: uuid }
+      example: 7c1f0a52-3b7e-4d0e-9a41-2f6d8c5b1e90
+    Page:
+      in: query
+      name: page
+      description: Номер страницы, начиная с 0
+      schema: { type: integer, minimum: 0, default: 0 }
+      example: 0
+    Size:
+      in: query
+      name: size
+      description: Размер страницы
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      example: 20
+  schemas:
+    Review:
+      type: object
+      required: [id, bookingId, venueId, roomId, authorId, authorName, rating, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        bookingId: { type: string, format: uuid }
+        venueId: { type: string, format: uuid }
+        roomId: { type: string, format: uuid }
+        authorId: { type: string, format: uuid }
+        authorName: { type: string, description: Имя автора из токена на момент публикации }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        text: { type: string }
+        status: { type: string, enum: [PUBLISHED, REMOVED] }
+        createdAt: { type: string, format: date-time }
+    CreateReviewRequest:
+      type: object
+      required: [bookingId, rating]
+      properties:
+        bookingId: { type: string, format: uuid }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        text: { type: string, maxLength: 2000 }
+    ReviewPage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Review' }
+        page: { $ref: '#/components/schemas/PageMeta' }
+    Problem:
+      type: object
+      description: >-
+        Единая модель ошибки для всех сервисов JamSlot (RFC 9457 Problem Details).
+        Поле code — машиночитаемый код, по которому клиент выбирает поведение.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, description: Идентификатор типа ошибки }
+        title: { type: string, description: Краткое описание типа ошибки }
+        status: { type: integer, description: HTTP-код ответа }
+        code: { type: string, description: Машиночитаемый код ошибки }
+        detail: { type: string, description: Пояснение для конкретного случая }
+        instance: { type: string, description: 'Путь запроса, на котором возникла ошибка' }
+        traceId: { type: string, description: Идентификатор трассировки (X-Correlation-Id) }
+        errors:
+          type: array
+          description: Ошибки по отдельным полям (только для ошибок валидации)
+          items: { $ref: '#/components/schemas/FieldError' }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+    PageMeta:
+      type: object
+      description: Сведения о странице списка
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1 }
+        totalElements: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Запрос не прошёл валидацию
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:validation-error
+            title: Некорректный запрос
+            status: 400
+            code: VALIDATION_ERROR
+            detail: Одно или несколько полей заполнены неверно
+            traceId: 0b9d6c1e-52a4-4f3b-8e77-1c2d3e4f5a6b
+            errors:
+              - { field: size, message: должно быть не больше 100 }
+    Unauthorized:
+      description: Токен отсутствует, просрочен или не прошёл проверку
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:unauthorized
+            title: Требуется авторизация
+            status: 401
+            code: UNAUTHORIZED
+            detail: Access-токен отсутствует или просрочен
+    Forbidden:
+      description: Недостаточно прав для операции
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:forbidden
+            title: Доступ запрещён
+            status: 403
+            code: FORBIDDEN
+            detail: Операция доступна только владельцу ресурса или менеджеру площадки
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:not-found
+            title: Ресурс не найден
+            status: 404
+            code: NOT_FOUND
+            detail: Объект с указанным идентификатором не существует
+    UnprocessableEntity:
+      description: Запрос корректен по форме, но нарушает бизнес-правило
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:business-rule-violation
+            title: Нарушено бизнес-правило
+            status: 422
+            code: BUSINESS_RULE_VIOLATION
+            detail: Интервал выходит за часы работы площадки
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access-токен пользователя, выданный Keycloak (realm jamslot). Проверяется на API Gateway.

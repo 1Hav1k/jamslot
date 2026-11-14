@@ -1,0 +1,19 @@
+# Настройки Redocly CLI. Запуск: npx @redocly/cli@latest lint
+extends:
+  - recommended
+apis:
+  venue@v1:
+    root: api/venue-service.yaml
+  booking@v1:
+    root: api/booking-service.yaml
+  equipment@v1:
+    root: api/equipment-service.yaml
+  payment@v1:
+    root: api/payment-service.yaml
+  review@v1:
+    root: api/review-service.yaml
+  notification@v1:
+    root: api/notification-service.yaml
+rules:
+  # Учебный проект разворачивается локально, поэтому адрес Gateway — localhost
+  no-server-example.com: off
