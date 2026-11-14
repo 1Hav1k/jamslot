@@ -1,0 +1,407 @@
+openapi: 3.1.0
+info:
+  title: payment-service
+  version: 1.0.0
+  summary: Платежи и возвраты JamSlot
+  description: >-
+    Приём оплаты броней через внешний платёжный шлюз (ЮKassa), обработка его уведомлений и
+    возвраты. Сервис публикует события payment.* и принимает команду payment.refund
+    (см. asyncapi.yaml).
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8000
+    description: API Gateway (внешние эндпоинты /api/v1/**)
+  - url: http://payment-service:8080
+    description: Внутренняя сеть (эндпоинты /internal/v1/**)
+tags:
+  - name: public
+    description: Эндпоинты для клиентских приложений, доступны через API Gateway
+  - name: webhook
+    description: Входящие уведомления платёжного шлюза, приходят через API Gateway
+  - name: internal
+    description: Эндпоинты для других сервисов, через API Gateway не публикуются
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/payments:
+    get:
+      tags: [public]
+      operationId: listPayments
+      summary: Список платежей пользователя
+      parameters:
+        - in: query
+          name: bookingId
+          description: Платежи по конкретной брони
+          schema: { type: string, format: uuid }
+          example: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Страница списка платежей
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentPage' }
+              example:
+                items:
+                  - id: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+                    bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                    userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                    amount: 2000.00
+                    refundedAmount: 0
+                    currency: RUB
+                    status: SUCCEEDED
+                    paymentUrl: null
+                    expiresAt: '2026-11-13T19:15:00+03:00'
+                    createdAt: '2026-11-13T19:00:02+03:00'
+                    paidAt: '2026-11-13T19:04:12+03:00'
+                page: { page: 0, size: 20, totalElements: 1, totalPages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/payments/{paymentId}:
+    parameters:
+      - in: path
+        name: paymentId
+        required: true
+        description: Идентификатор платежа
+        schema: { type: string, format: uuid }
+        example: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+    get:
+      tags: [public]
+      operationId: getPayment
+      summary: Получить платёж
+      responses:
+        '200':
+          description: Платёж
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+              example:
+                id: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+                bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                amount: 2000.00
+                refundedAmount: 0
+                currency: RUB
+                status: SUCCEEDED
+                paymentUrl: null
+                expiresAt: '2026-11-13T19:15:00+03:00'
+                createdAt: '2026-11-13T19:00:02+03:00'
+                paidAt: '2026-11-13T19:04:12+03:00'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/payments/webhooks/yookassa:
+    post:
+      tags: [webhook]
+      operationId: handleYooKassaNotification
+      summary: Принять уведомление платёжного шлюза
+      description: >-
+        Вызывает ЮKassa при смене статуса платежа или возврата. Пользовательского токена нет:
+        подлинность проверяется по списку IP-адресов шлюза на API Gateway и повторным запросом
+        статуса объекта у шлюза. Обработка идемпотентна по идентификатору объекта и его статусу —
+        шлюз повторяет уведомление, пока не получит 200.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/YooKassaNotification' }
+            example:
+              type: notification
+              event: payment.succeeded
+              object:
+                id: 2f1c9a7e-000f-5000-9000-1b2c3d4e5f60
+                status: succeeded
+                amount: { value: '2000.00', currency: RUB }
+                metadata: { paymentId: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310 }
+      responses:
+        '200':
+          description: Уведомление принято (в том числе повторное)
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /internal/v1/payments:
+    post:
+      tags: [internal]
+      operationId: createPayment
+      summary: Создать платёж по брони
+      description: >-
+        Вызывает booking-service в рамках саги бронирования. Сервис создаёт платёж у шлюза и
+        возвращает ссылку на страницу оплаты. Операция идемпотентна: по одной брони существует
+        не более одного активного платежа, повтор с тем же Idempotency-Key возвращает его же.
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePaymentRequest' }
+            example:
+              bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+              userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+              amount: 2000.00
+              currency: RUB
+              description: Гараж 61, комната «Красная», 20.11 18:00–20:00
+              returnUrl: http://localhost:5173/bookings/9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+              expiresAt: '2026-11-13T19:15:00+03:00'
+      responses:
+        '201':
+          description: Платёж создан, ожидает оплаты
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+              example:
+                id: b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310
+                bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                userId: 2f8e4b1a-7c3d-4e5f-a6b7-c8d9e0f1a2b3
+                amount: 2000.00
+                refundedAmount: 0
+                currency: RUB
+                status: PENDING
+                paymentUrl: https://yoomoney.ru/checkout/payments/v2/contract?orderId=2f1c9a7e-000f-5000-9000-1b2c3d4e5f60
+                expiresAt: '2026-11-13T19:15:00+03:00'
+                createdAt: '2026-11-13T19:00:02+03:00'
+                paidAt: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: По брони уже есть платёж с другими параметрами
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: urn:jamslot:problem:payment-already-exists
+                title: Платёж уже существует
+                status: 409
+                code: PAYMENT_ALREADY_EXISTS
+                detail: Для брони уже создан платёж на другую сумму
+        '502':
+          description: Платёжный шлюз вернул ошибку
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: urn:jamslot:problem:payment-provider-error
+                title: Ошибка платёжного шлюза
+                status: 502
+                code: PAYMENT_PROVIDER_ERROR
+                detail: Шлюз отклонил создание платежа
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+components:
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      description: >-
+        Ключ идемпотентности (UUID). Повтор запроса с тем же ключом возвращает
+        результат первого запроса и не создаёт дубль. Ключ хранится 24 часа.
+      schema: { type: string, format: uuid }
+      example: 7c1f0a52-3b7e-4d0e-9a41-2f6d8c5b1e90
+    CorrelationId:
+      in: header
+      name: X-Correlation-Id
+      required: false
+      description: >-
+        Сквозной идентификатор сценария. Выставляет API Gateway, сервисы передают его
+        дальше в вызовах и копируют в поле correlationId событий.
+      schema: { type: string, format: uuid }
+      example: 0b9d6c1e-52a4-4f3b-8e77-1c2d3e4f5a6b
+    Page:
+      in: query
+      name: page
+      description: Номер страницы, начиная с 0
+      schema: { type: integer, minimum: 0, default: 0 }
+      example: 0
+    Size:
+      in: query
+      name: size
+      description: Размер страницы
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      example: 20
+  schemas:
+    PaymentStatus:
+      type: string
+      description: >-
+        PENDING — создан, ждёт оплаты; SUCCEEDED — оплачен; FAILED — отклонён шлюзом;
+        CANCELLED — отменён до оплаты (бронь отменена или истекла); REFUNDED — возвращён.
+      enum: [PENDING, SUCCEEDED, FAILED, CANCELLED, REFUNDED]
+    Payment:
+      type: object
+      required: [id, bookingId, userId, amount, refundedAmount, currency, status, expiresAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        bookingId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        amount: { type: number, minimum: 0 }
+        refundedAmount: { type: number, minimum: 0 }
+        currency: { type: string, enum: [RUB] }
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        paymentUrl:
+          type: [string, 'null']
+          format: uri
+          description: Страница оплаты на стороне шлюза, заполнена только в статусе PENDING
+        expiresAt: { type: string, format: date-time, description: 'Срок, до которого платёж можно оплатить' }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: [string, 'null'], format: date-time }
+    CreatePaymentRequest:
+      type: object
+      required: [bookingId, userId, amount, currency, description, returnUrl, expiresAt]
+      properties:
+        bookingId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        amount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string, enum: [RUB] }
+        description: { type: string, maxLength: 128, description: Назначение платежа на странице оплаты }
+        returnUrl: { type: string, format: uri, description: Куда шлюз вернёт пользователя после оплаты }
+        expiresAt: { type: string, format: date-time }
+    PaymentPage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Payment' }
+        page: { $ref: '#/components/schemas/PageMeta' }
+    YooKassaNotification:
+      type: object
+      description: Уведомление ЮKassa. Описаны только поля, которые читает сервис.
+      required: [type, event, object]
+      properties:
+        type: { type: string, enum: [notification] }
+        event:
+          type: string
+          enum: [payment.succeeded, payment.canceled, refund.succeeded]
+        object:
+          type: object
+          description: Платёж или возврат на стороне шлюза
+          required: [id, status]
+          additionalProperties: true
+          properties:
+            id: { type: string, description: Идентификатор объекта у шлюза }
+            status: { type: string }
+            amount:
+              type: object
+              required: [value, currency]
+              properties:
+                value: { type: string }
+                currency: { type: string }
+            metadata:
+              type: object
+              additionalProperties: true
+              properties:
+                paymentId: { type: string, format: uuid, description: Идентификатор платежа в payment-service }
+    Problem:
+      type: object
+      description: >-
+        Единая модель ошибки для всех сервисов JamSlot (RFC 9457 Problem Details).
+        Поле code — машиночитаемый код, по которому клиент выбирает поведение.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, description: Идентификатор типа ошибки }
+        title: { type: string, description: Краткое описание типа ошибки }
+        status: { type: integer, description: HTTP-код ответа }
+        code: { type: string, description: Машиночитаемый код ошибки }
+        detail: { type: string, description: Пояснение для конкретного случая }
+        instance: { type: string, description: 'Путь запроса, на котором возникла ошибка' }
+        traceId: { type: string, description: Идентификатор трассировки (X-Correlation-Id) }
+        errors:
+          type: array
+          description: Ошибки по отдельным полям (только для ошибок валидации)
+          items: { $ref: '#/components/schemas/FieldError' }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+    PageMeta:
+      type: object
+      description: Сведения о странице списка
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1 }
+        totalElements: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Запрос не прошёл валидацию
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:validation-error
+            title: Некорректный запрос
+            status: 400
+            code: VALIDATION_ERROR
+            detail: Одно или несколько полей заполнены неверно
+            traceId: 0b9d6c1e-52a4-4f3b-8e77-1c2d3e4f5a6b
+            errors:
+              - { field: size, message: должно быть не больше 100 }
+    Unauthorized:
+      description: Токен отсутствует, просрочен или не прошёл проверку
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:unauthorized
+            title: Требуется авторизация
+            status: 401
+            code: UNAUTHORIZED
+            detail: Access-токен отсутствует или просрочен
+    Forbidden:
+      description: Недостаточно прав для операции
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:forbidden
+            title: Доступ запрещён
+            status: 403
+            code: FORBIDDEN
+            detail: Операция доступна только владельцу ресурса или менеджеру площадки
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:not-found
+            title: Ресурс не найден
+            status: 404
+            code: NOT_FOUND
+            detail: Объект с указанным идентификатором не существует
+    ServiceUnavailable:
+      description: Сервис или его зависимость временно недоступны, запрос можно повторить
+      headers:
+        Retry-After:
+          description: Через сколько секунд повторить запрос
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:service-unavailable
+            title: Сервис временно недоступен
+            status: 503
+            code: SERVICE_UNAVAILABLE
+            detail: Зависимый сервис не ответил за отведённое время
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access-токен пользователя, выданный Keycloak (realm jamslot). Проверяется на API Gateway.
+    serviceAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Токен сервисной учётной записи Keycloak (client credentials). Используется только
+        во внутренних вызовах между сервисами; через API Gateway пути /internal/** недоступны.

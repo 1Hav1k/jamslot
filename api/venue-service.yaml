@@ -1,0 +1,618 @@
+openapi: 3.1.0
+info:
+  title: venue-service
+  version: 1.0.0
+  summary: Каталог площадок и комнат JamSlot
+  description: >-
+    Каталог репетиционных баз и студий: площадки, комнаты, часы работы и тарифы.
+    Внешние эндпоинты доступны клиенту через API Gateway, внутренние (тег internal) —
+    только другим сервисам внутри сети.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8000
+    description: API Gateway (внешние эндпоинты /api/v1/**)
+  - url: http://venue-service:8080
+    description: Внутренняя сеть (эндпоинты /internal/v1/**)
+tags:
+  - name: public
+    description: Эндпоинты для клиентских приложений, доступны через API Gateway
+  - name: internal
+    description: Эндпоинты для других сервисов, через API Gateway не публикуются
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/venues:
+    get:
+      tags: [public]
+      operationId: listVenues
+      summary: Найти площадки
+      description: Список активных площадок с фильтрами. Доступен без авторизации, ответ кэшируется в Redis на 60 секунд.
+      security: []
+      parameters:
+        - in: query
+          name: city
+          description: Город
+          schema: { type: string }
+          example: Ростов-на-Дону
+        - in: query
+          name: roomType
+          description: Оставить площадки, где есть комнаты указанного типа
+          schema: { $ref: '#/components/schemas/RoomType' }
+          example: REHEARSAL
+        - in: query
+          name: q
+          description: Подстрока в названии площадки
+          schema: { type: string, minLength: 2 }
+          example: гараж
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Страница списка площадок
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VenuePage' }
+              example:
+                items:
+                  - id: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                    name: Гараж 61
+                    city: Ростов-на-Дону
+                    address: ул. Текучёва, 139
+                    description: Три репетиционные комнаты и студия записи
+                    phone: '+78632000000'
+                    workingHours: { opensAt: '10:00', closesAt: '23:00' }
+                    ratingAvg: 4.7
+                    ratingCount: 38
+                    status: ACTIVE
+                    createdAt: '2026-09-01T09:00:00Z'
+                page: { page: 0, size: 20, totalElements: 1, totalPages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    post:
+      tags: [public]
+      operationId: createVenue
+      summary: Создать площадку
+      description: Доступно роли venue_manager. Создатель становится менеджером площадки.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateVenueRequest' }
+            example:
+              name: Гараж 61
+              city: Ростов-на-Дону
+              address: ул. Текучёва, 139
+              description: Три репетиционные комнаты и студия записи
+              phone: '+78632000000'
+              workingHours: { opensAt: '10:00', closesAt: '23:00' }
+      responses:
+        '201':
+          description: Площадка создана
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Venue' }
+              example:
+                id: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                name: Гараж 61
+                city: Ростов-на-Дону
+                address: ул. Текучёва, 139
+                description: Три репетиционные комнаты и студия записи
+                phone: '+78632000000'
+                workingHours: { opensAt: '10:00', closesAt: '23:00' }
+                ratingAvg: null
+                ratingCount: 0
+                status: ACTIVE
+                createdAt: '2026-09-01T09:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/venues/{venueId}:
+    parameters:
+      - $ref: '#/components/parameters/VenueId'
+    get:
+      tags: [public]
+      operationId: getVenue
+      summary: Получить площадку
+      security: []
+      responses:
+        '200':
+          description: Площадка
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Venue' }
+              example:
+                id: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                name: Гараж 61
+                city: Ростов-на-Дону
+                address: ул. Текучёва, 139
+                description: Три репетиционные комнаты и студия записи
+                phone: '+78632000000'
+                workingHours: { opensAt: '10:00', closesAt: '23:00' }
+                ratingAvg: 4.7
+                ratingCount: 38
+                status: ACTIVE
+                createdAt: '2026-09-01T09:00:00Z'
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [public]
+      operationId: updateVenue
+      summary: Изменить площадку
+      description: Доступно менеджеру этой площадки. Передаются только изменяемые поля.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateVenueRequest' }
+            example:
+              workingHours: { opensAt: '09:00', closesAt: '23:00' }
+      responses:
+        '200':
+          description: Площадка обновлена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Venue' }
+              example:
+                id: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                name: Гараж 61
+                city: Ростов-на-Дону
+                address: ул. Текучёва, 139
+                description: Три репетиционные комнаты и студия записи
+                phone: '+78632000000'
+                workingHours: { opensAt: '09:00', closesAt: '23:00' }
+                ratingAvg: 4.7
+                ratingCount: 38
+                status: ACTIVE
+                createdAt: '2026-09-01T09:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/venues/{venueId}/rooms:
+    parameters:
+      - $ref: '#/components/parameters/VenueId'
+    get:
+      tags: [public]
+      operationId: listVenueRooms
+      summary: Список комнат площадки
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Страница списка комнат
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomPage' }
+              example:
+                items:
+                  - id: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                    venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                    name: Комната «Красная»
+                    type: REHEARSAL
+                    description: 28 м², барабаны Tama, два гитарных комбо, бас-комбо, вокальная линия
+                    capacity: 6
+                    pricePerHour: 700.00
+                    currency: RUB
+                    minBookingHours: 1
+                    status: ACTIVE
+                page: { page: 0, size: 20, totalElements: 1, totalPages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [public]
+      operationId: createRoom
+      summary: Добавить комнату
+      description: Доступно менеджеру этой площадки.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRoomRequest' }
+            example:
+              name: Комната «Красная»
+              type: REHEARSAL
+              description: 28 м², барабаны Tama, два гитарных комбо, бас-комбо, вокальная линия
+              capacity: 6
+              pricePerHour: 700.00
+              minBookingHours: 1
+      responses:
+        '201':
+          description: Комната создана
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+              example:
+                id: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                name: Комната «Красная»
+                type: REHEARSAL
+                description: 28 м², барабаны Tama, два гитарных комбо, бас-комбо, вокальная линия
+                capacity: 6
+                pricePerHour: 700.00
+                currency: RUB
+                minBookingHours: 1
+                status: ACTIVE
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/rooms/{roomId}:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    get:
+      tags: [public]
+      operationId: getRoom
+      summary: Получить комнату
+      security: []
+      responses:
+        '200':
+          description: Комната
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+              example:
+                id: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                name: Комната «Красная»
+                type: REHEARSAL
+                description: 28 м², барабаны Tama, два гитарных комбо, бас-комбо, вокальная линия
+                capacity: 6
+                pricePerHour: 700.00
+                currency: RUB
+                minBookingHours: 1
+                status: ACTIVE
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [public]
+      operationId: updateRoom
+      summary: Изменить комнату или тариф
+      description: >-
+        Доступно менеджеру площадки. Новая цена действует только для новых броней:
+        booking-service хранит снимок цены на момент бронирования.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRoomRequest' }
+            example:
+              pricePerHour: 800.00
+      responses:
+        '200':
+          description: Комната обновлена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+              example:
+                id: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                name: Комната «Красная»
+                type: REHEARSAL
+                description: 28 м², барабаны Tama, два гитарных комбо, бас-комбо, вокальная линия
+                capacity: 6
+                pricePerHour: 800.00
+                currency: RUB
+                minBookingHours: 1
+                status: ACTIVE
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /internal/v1/rooms/{roomId}/quote:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    get:
+      tags: [internal]
+      operationId: getRoomQuote
+      summary: Проверить интервал и рассчитать стоимость комнаты
+      description: >-
+        Вызывает booking-service при создании брони. Проверяет, что комната активна, интервал
+        кратен часу, не короче минимального и укладывается в часы работы площадки, и возвращает
+        стоимость. Занятость интервала здесь не проверяется — ею владеет booking-service.
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - in: query
+          name: startsAt
+          required: true
+          description: Начало интервала
+          schema: { type: string, format: date-time }
+          example: '2026-11-20T18:00:00+03:00'
+        - in: query
+          name: endsAt
+          required: true
+          description: Конец интервала
+          schema: { type: string, format: date-time }
+          example: '2026-11-20T20:00:00+03:00'
+      responses:
+        '200':
+          description: Интервал допустим, стоимость рассчитана
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomQuote' }
+              example:
+                roomId: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+                venueId: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+                venueName: Гараж 61
+                roomName: Комната «Красная»
+                startsAt: '2026-11-20T18:00:00+03:00'
+                endsAt: '2026-11-20T20:00:00+03:00'
+                hours: 2
+                pricePerHour: 700.00
+                totalPrice: 1400.00
+                currency: RUB
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+components:
+  parameters:
+    VenueId:
+      in: path
+      name: venueId
+      required: true
+      description: Идентификатор площадки
+      schema: { type: string, format: uuid }
+      example: 5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d
+    RoomId:
+      in: path
+      name: roomId
+      required: true
+      description: Идентификатор комнаты
+      schema: { type: string, format: uuid }
+      example: a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      description: >-
+        Ключ идемпотентности (UUID). Повтор запроса с тем же ключом возвращает
+        результат первого запроса и не создаёт дубль. Ключ хранится 24 часа.
+      schema: { type: string, format: uuid }
+      example: 7c1f0a52-3b7e-4d0e-9a41-2f6d8c5b1e90
+    CorrelationId:
+      in: header
+      name: X-Correlation-Id
+      required: false
+      description: >-
+        Сквозной идентификатор сценария. Выставляет API Gateway, сервисы передают его
+        дальше в вызовах и копируют в поле correlationId событий.
+      schema: { type: string, format: uuid }
+      example: 0b9d6c1e-52a4-4f3b-8e77-1c2d3e4f5a6b
+    Page:
+      in: query
+      name: page
+      description: Номер страницы, начиная с 0
+      schema: { type: integer, minimum: 0, default: 0 }
+      example: 0
+    Size:
+      in: query
+      name: size
+      description: Размер страницы
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      example: 20
+  schemas:
+    RoomType:
+      type: string
+      description: Тип комнаты
+      enum: [REHEARSAL, RECORDING, DRUM_ROOM]
+    WorkingHours:
+      type: object
+      description: Часы работы площадки в её местном времени
+      required: [opensAt, closesAt]
+      properties:
+        opensAt: { type: string, pattern: '^([01]\d|2[0-3]):00$', description: 'Время открытия, ЧЧ:00' }
+        closesAt: { type: string, pattern: '^([01]\d|2[0-3]):00$', description: 'Время закрытия, ЧЧ:00' }
+    Venue:
+      type: object
+      required: [id, name, city, address, workingHours, ratingCount, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        city: { type: string }
+        address: { type: string }
+        description: { type: string }
+        phone: { type: string }
+        workingHours: { $ref: '#/components/schemas/WorkingHours' }
+        ratingAvg:
+          type: [number, 'null']
+          description: Средняя оценка. Копия агрегата review-service, обновляется по событиям review.*
+        ratingCount: { type: integer, minimum: 0 }
+        status: { type: string, enum: [ACTIVE, HIDDEN] }
+        createdAt: { type: string, format: date-time }
+    CreateVenueRequest:
+      type: object
+      required: [name, city, address, workingHours]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        city: { type: string, maxLength: 80 }
+        address: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        phone: { type: string, maxLength: 20 }
+        workingHours: { $ref: '#/components/schemas/WorkingHours' }
+    UpdateVenueRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        address: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        phone: { type: string, maxLength: 20 }
+        workingHours: { $ref: '#/components/schemas/WorkingHours' }
+        status: { type: string, enum: [ACTIVE, HIDDEN] }
+    VenuePage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Venue' }
+        page: { $ref: '#/components/schemas/PageMeta' }
+    Room:
+      type: object
+      required: [id, venueId, name, type, capacity, pricePerHour, currency, minBookingHours, status]
+      properties:
+        id: { type: string, format: uuid }
+        venueId: { type: string, format: uuid }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/RoomType' }
+        description: { type: string }
+        capacity: { type: integer, minimum: 1, description: Сколько человек вмещает комната }
+        pricePerHour: { type: number, minimum: 0, description: Цена часа в рублях }
+        currency: { type: string, enum: [RUB] }
+        minBookingHours: { type: integer, minimum: 1 }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+    CreateRoomRequest:
+      type: object
+      required: [name, type, capacity, pricePerHour]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        type: { $ref: '#/components/schemas/RoomType' }
+        description: { type: string, maxLength: 2000 }
+        capacity: { type: integer, minimum: 1, maximum: 50 }
+        pricePerHour: { type: number, minimum: 0 }
+        minBookingHours: { type: integer, minimum: 1, default: 1 }
+    UpdateRoomRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        capacity: { type: integer, minimum: 1, maximum: 50 }
+        pricePerHour: { type: number, minimum: 0 }
+        minBookingHours: { type: integer, minimum: 1 }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+    RoomPage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Room' }
+        page: { $ref: '#/components/schemas/PageMeta' }
+    RoomQuote:
+      type: object
+      description: Результат проверки интервала и расчёта стоимости комнаты
+      required: [roomId, venueId, venueName, roomName, startsAt, endsAt, hours, pricePerHour, totalPrice, currency]
+      properties:
+        roomId: { type: string, format: uuid }
+        venueId: { type: string, format: uuid }
+        venueName: { type: string }
+        roomName: { type: string }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        hours: { type: integer, minimum: 1 }
+        pricePerHour: { type: number, minimum: 0 }
+        totalPrice: { type: number, minimum: 0 }
+        currency: { type: string, enum: [RUB] }
+    Problem:
+      type: object
+      description: >-
+        Единая модель ошибки для всех сервисов JamSlot (RFC 9457 Problem Details).
+        Поле code — машиночитаемый код, по которому клиент выбирает поведение.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, description: Идентификатор типа ошибки }
+        title: { type: string, description: Краткое описание типа ошибки }
+        status: { type: integer, description: HTTP-код ответа }
+        code: { type: string, description: Машиночитаемый код ошибки }
+        detail: { type: string, description: Пояснение для конкретного случая }
+        instance: { type: string, description: 'Путь запроса, на котором возникла ошибка' }
+        traceId: { type: string, description: Идентификатор трассировки (X-Correlation-Id) }
+        errors:
+          type: array
+          description: Ошибки по отдельным полям (только для ошибок валидации)
+          items: { $ref: '#/components/schemas/FieldError' }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+    PageMeta:
+      type: object
+      description: Сведения о странице списка
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1 }
+        totalElements: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Запрос не прошёл валидацию
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:validation-error
+            title: Некорректный запрос
+            status: 400
+            code: VALIDATION_ERROR
+            detail: Одно или несколько полей заполнены неверно
+            traceId: 0b9d6c1e-52a4-4f3b-8e77-1c2d3e4f5a6b
+            errors:
+              - { field: size, message: должно быть не больше 100 }
+    Unauthorized:
+      description: Токен отсутствует, просрочен или не прошёл проверку
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:unauthorized
+            title: Требуется авторизация
+            status: 401
+            code: UNAUTHORIZED
+            detail: Access-токен отсутствует или просрочен
+    Forbidden:
+      description: Недостаточно прав для операции
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:forbidden
+            title: Доступ запрещён
+            status: 403
+            code: FORBIDDEN
+            detail: Операция доступна только владельцу ресурса или менеджеру площадки
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:not-found
+            title: Ресурс не найден
+            status: 404
+            code: NOT_FOUND
+            detail: Объект с указанным идентификатором не существует
+    UnprocessableEntity:
+      description: Запрос корректен по форме, но нарушает бизнес-правило
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:business-rule-violation
+            title: Нарушено бизнес-правило
+            status: 422
+            code: BUSINESS_RULE_VIOLATION
+            detail: Интервал выходит за часы работы площадки
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access-токен пользователя, выданный Keycloak (realm jamslot). Проверяется на API Gateway.
+    serviceAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Токен сервисной учётной записи Keycloak (client credentials). Используется только
+        во внутренних вызовах между сервисами; через API Gateway пути /internal/** недоступны.

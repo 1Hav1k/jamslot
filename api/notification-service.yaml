@@ -1,0 +1,209 @@
+openapi: 3.1.0
+info:
+  title: notification-service
+  version: 1.0.0
+  summary: Уведомления JamSlot
+  description: >-
+    Письма и напоминания пользователям. Сервис работает только от событий booking.* и
+    payment.refunded (см. asyncapi.yaml): подписывается на них, формирует письмо и отправляет
+    через SMTP-провайдера. Внешний API нужен клиенту, чтобы посмотреть историю уведомлений
+    и настроить их.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8000
+    description: API Gateway (внешние эндпоинты /api/v1/**)
+tags:
+  - name: public
+    description: Эндпоинты для клиентских приложений, доступны через API Gateway
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/notifications:
+    get:
+      tags: [public]
+      operationId: listNotifications
+      summary: История уведомлений пользователя
+      parameters:
+        - in: query
+          name: type
+          description: Фильтр по типу уведомления
+          schema: { $ref: '#/components/schemas/NotificationType' }
+          example: BOOKING_CONFIRMED
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Страница списка уведомлений, сначала новые
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPage' }
+              example:
+                items:
+                  - id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                    type: BOOKING_CONFIRMED
+                    channel: EMAIL
+                    status: SENT
+                    subject: Бронь подтверждена — Гараж 61, 20 ноября, 18:00
+                    bookingId: 9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a
+                    scheduledAt: '2026-11-13T19:04:13+03:00'
+                    sentAt: '2026-11-13T19:04:15+03:00'
+                page: { page: 0, size: 20, totalElements: 1, totalPages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/notification-preferences:
+    get:
+      tags: [public]
+      operationId: getNotificationPreferences
+      summary: Получить настройки уведомлений
+      responses:
+        '200':
+          description: Настройки текущего пользователя
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+              example:
+                emailEnabled: true
+                reminderEnabled: true
+                reminderHoursBefore: 2
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [public]
+      operationId: updateNotificationPreferences
+      summary: Изменить настройки уведомлений
+      description: Полная замена настроек, операция идемпотентна. Письма об оплате и возврате отправляются всегда.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferences' }
+            example:
+              emailEnabled: true
+              reminderEnabled: true
+              reminderHoursBefore: 3
+      responses:
+        '200':
+          description: Настройки сохранены
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+              example:
+                emailEnabled: true
+                reminderEnabled: true
+                reminderHoursBefore: 3
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+components:
+  parameters:
+    Page:
+      in: query
+      name: page
+      description: Номер страницы, начиная с 0
+      schema: { type: integer, minimum: 0, default: 0 }
+      example: 0
+    Size:
+      in: query
+      name: size
+      description: Размер страницы
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      example: 20
+  schemas:
+    NotificationType:
+      type: string
+      enum: [BOOKING_CONFIRMED, BOOKING_CANCELLED, BOOKING_EXPIRED, BOOKING_REMINDER, REVIEW_INVITATION, REFUND_COMPLETED]
+    Notification:
+      type: object
+      required: [id, type, channel, status, subject, scheduledAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/NotificationType' }
+        channel: { type: string, enum: [EMAIL] }
+        status:
+          type: string
+          description: SCHEDULED — ждёт времени отправки (напоминание); SENT — отправлено; FAILED — не доставлено после всех повторов
+          enum: [SCHEDULED, SENT, FAILED]
+        subject: { type: string }
+        bookingId: { type: [string, 'null'], format: uuid }
+        scheduledAt: { type: string, format: date-time }
+        sentAt: { type: [string, 'null'], format: date-time }
+    NotificationPage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Notification' }
+        page: { $ref: '#/components/schemas/PageMeta' }
+    NotificationPreferences:
+      type: object
+      required: [emailEnabled, reminderEnabled, reminderHoursBefore]
+      properties:
+        emailEnabled: { type: boolean, description: Присылать письма об отмене и истечении брони }
+        reminderEnabled: { type: boolean, description: Присылать напоминание перед репетицией }
+        reminderHoursBefore: { type: integer, minimum: 1, maximum: 48, description: За сколько часов до начала напоминать }
+    Problem:
+      type: object
+      description: >-
+        Единая модель ошибки для всех сервисов JamSlot (RFC 9457 Problem Details).
+        Поле code — машиночитаемый код, по которому клиент выбирает поведение.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, description: Идентификатор типа ошибки }
+        title: { type: string, description: Краткое описание типа ошибки }
+        status: { type: integer, description: HTTP-код ответа }
+        code: { type: string, description: Машиночитаемый код ошибки }
+        detail: { type: string, description: Пояснение для конкретного случая }
+        instance: { type: string, description: 'Путь запроса, на котором возникла ошибка' }
+        traceId: { type: string, description: Идентификатор трассировки (X-Correlation-Id) }
+        errors:
+          type: array
+          description: Ошибки по отдельным полям (только для ошибок валидации)
+          items: { $ref: '#/components/schemas/FieldError' }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+    PageMeta:
+      type: object
+      description: Сведения о странице списка
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1 }
+        totalElements: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Запрос не прошёл валидацию
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:validation-error
+            title: Некорректный запрос
+            status: 400
+            code: VALIDATION_ERROR
+            detail: Одно или несколько полей заполнены неверно
+            traceId: 0b9d6c1e-52a4-4f3b-8e77-1c2d3e4f5a6b
+            errors:
+              - { field: size, message: должно быть не больше 100 }
+    Unauthorized:
+      description: Токен отсутствует, просрочен или не прошёл проверку
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: urn:jamslot:problem:unauthorized
+            title: Требуется авторизация
+            status: 401
+            code: UNAUTHORIZED
+            detail: Access-токен отсутствует или просрочен
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access-токен пользователя, выданный Keycloak (realm jamslot). Проверяется на API Gateway.
