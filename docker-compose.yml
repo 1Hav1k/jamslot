@@ -1,0 +1,159 @@
+# JamSlot — локальный запуск (ЛР4).
+# Запуск: docker compose up -d --build
+# Клиент ходит только через API Gateway: http://localhost:8000
+name: jamslot
+
+x-service: &service
+  build:
+    context: ./services
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on: &deps
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 10s
+
+x-env: &env
+  AMQP_URL: amqp://jamslot:jamslot@rabbitmq:5672/%2F
+  VENUE_TIMEZONE: Europe/Moscow
+  LOG_LEVEL: INFO
+
+services:
+  # --- инфраструктура -----------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "5433:5432"   # 5433, чтобы не конфликтовать с локальным PostgreSQL на 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d booking_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: jamslot
+      RABBITMQ_DEFAULT_PASS: jamslot
+    ports:
+      - "15672:15672" # веб-интерфейс: http://localhost:15672 (jamslot / jamslot)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  # --- моки внешних систем ------------------------------------------------------------
+  wiremock:           # платёжный шлюз ЮKassa
+    image: wiremock/wiremock:3.9.1
+    command: ["--verbose"]
+    volumes:
+      - ./mocks/wiremock:/home/wiremock:ro
+    ports:
+      - "8089:8080"   # страница оплаты и журнал: http://localhost:8089/__admin/requests
+
+  mailpit:            # SMTP-сервер, письма видны в веб-интерфейсе
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"   # http://localhost:8025
+
+  # --- сервисы JamSlot ----------------------------------------------------------------
+  api-gateway:
+    <<: *service
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE_DIR: gateway, PACKAGE: gateway }
+    depends_on:
+      venue-service: { condition: service_healthy }
+      booking-service: { condition: service_healthy }
+      equipment-service: { condition: service_healthy }
+      payment-service: { condition: service_healthy }
+      notification-service: { condition: service_healthy }
+    environment:
+      JWT_SECRET: jamslot-dev-secret-change-me-in-production
+      RATE_LIMIT_PER_MINUTE: "300"
+    ports:
+      - "8000:8080"
+
+  venue-service:
+    <<: *service
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE_DIR: venue-service, PACKAGE: venue_service }
+    environment:
+      <<: *env
+      DATABASE_URL: postgresql://venue_user:venue_pass@postgres:5432/venue_db
+
+  booking-service:
+    <<: *service
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE_DIR: booking-service, PACKAGE: booking_service }
+    environment:
+      <<: *env
+      DATABASE_URL: postgresql://booking_user:booking_pass@postgres:5432/booking_db
+      VENUE_SERVICE_URL: http://venue-service:8080
+      EQUIPMENT_SERVICE_URL: http://equipment-service:8080
+      PAYMENT_SERVICE_URL: http://payment-service:8080
+      PUBLIC_APP_URL: http://localhost:8000
+      BOOKING_HOLD_SECONDS: ${BOOKING_HOLD_SECONDS:-900}
+
+  equipment-service:
+    <<: *service
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE_DIR: equipment-service, PACKAGE: equipment_service }
+    environment:
+      <<: *env
+      DATABASE_URL: postgresql://equipment_user:equipment_pass@postgres:5432/equipment_db
+
+  payment-service:
+    <<: *service
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE_DIR: payment-service, PACKAGE: payment_service }
+    depends_on:
+      <<: *deps
+      wiremock: { condition: service_started }
+    environment:
+      <<: *env
+      DATABASE_URL: postgresql://payment_user:payment_pass@postgres:5432/payment_db
+      YOOKASSA_URL: http://wiremock:8080
+      YOOKASSA_SHOP_ID: "123456"
+      YOOKASSA_SECRET_KEY: test_secret
+
+  notification-service:
+    <<: *service
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE_DIR: notification-service, PACKAGE: notification_service }
+    depends_on:
+      <<: *deps
+      mailpit: { condition: service_started }
+    environment:
+      <<: *env
+      DATABASE_URL: postgresql://notification_user:notification_pass@postgres:5432/notification_db
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+
+volumes:
+  pgdata:

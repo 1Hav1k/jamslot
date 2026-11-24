@@ -1,0 +1,2168 @@
+{
+  "info": {
+    "_postman_id": "5419d85f-78f6-557d-9d00-572211259458",
+    "name": "JamSlot — ЛР4",
+    "description": "Демонстрация сценариев ЛР4. Все запросы идут через API Gateway ({{baseUrl}}).\n\nПорядок: запустите папки 0–7 одним прогоном (Run collection, сняв галочки с папок 8 и 9). Токены и дата демо-броней получаются автоматически перед любым запросом, но папки 5 и 7 используют брони из папок 2 и 6 — их нужно запускать в том же прогоне. Папки 8 и 9 требуют действий в терминале — см. их описание и docs/demo-scenarios.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Выполняется перед каждым запросом коллекции.",
+          "// Если дата демо-броней или токены не заданы (например, папка «0. Подготовка» запускалась",
+          "// в другом прогоне Runner и значения переменных не сохранились) — получаем их здесь.",
+          "const v = pm.collectionVariables;",
+          "if (!v.get('demoDate')) {",
+          "  const d = new Date(Date.now() + (3 + Math.floor(Math.random() * 298)) * 86400000);",
+          "  v.set('demoDate', d.toISOString().slice(0, 10));",
+          "}",
+          "const users = { tokenIlya: 'ilya', tokenAnna: 'anna', tokenManager: 'manager' };",
+          "Object.keys(users).forEach((key) => {",
+          "  if (v.get(key) && Number(v.get(key + 'Exp') || 0) > Date.now() + 60000) return;",
+          "  pm.sendRequest({",
+          "    url: pm.variables.get('baseUrl') + '/auth/token',",
+          "    method: 'POST',",
+          "    header: [{ key: 'Content-Type', value: 'application/json' }],",
+          "    body: { mode: 'raw', raw: JSON.stringify({ username: users[key], password: 'password' }) }",
+          "  }, (err, res) => {",
+          "    if (err || res.code !== 200) {",
+          "      console.log('Не удалось получить токен для ' + users[key] + ': ' + (err || res.code));",
+          "      return;",
+          "    }",
+          "    v.set(key, res.json().access_token);",
+          "    v.set(key + 'Exp', String(Date.now() + res.json().expires_in * 1000));",
+          "  });",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "wiremockUrl",
+      "value": "http://localhost:8089"
+    },
+    {
+      "key": "venueGarage",
+      "value": "5d1c7a3e-0f4b-4c2a-9b6d-3e8f1a2b4c5d"
+    },
+    {
+      "key": "roomRed",
+      "value": "a3f2c1d0-9e8b-4a7c-8d6e-5f4a3b2c1d0e"
+    },
+    {
+      "key": "roomBlue",
+      "value": "b4e3d2c1-0f9a-4b8d-9e7f-6a5b4c3d2e1f"
+    },
+    {
+      "key": "itemStrat",
+      "value": "e7b1d2c3-4a5f-4b6c-8d7e-9f0a1b2c3d4e"
+    },
+    {
+      "key": "itemSm58",
+      "value": "f8c2e3d4-5b6a-4c7d-9e8f-0a1b2c3d4e5f"
+    },
+    {
+      "key": "demoDate",
+      "value": ""
+    },
+    {
+      "key": "tokenIlya",
+      "value": ""
+    },
+    {
+      "key": "tokenAnna",
+      "value": ""
+    },
+    {
+      "key": "tokenManager",
+      "value": ""
+    },
+    {
+      "key": "tokenIlyaExp",
+      "value": ""
+    },
+    {
+      "key": "tokenAnnaExp",
+      "value": ""
+    },
+    {
+      "key": "tokenManagerExp",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Подготовка",
+      "description": "Запустите первой: получает токены и выбирает случайную дату демо-броней, чтобы повторные прогоны не упирались в занятые интервалы.",
+      "item": [
+        {
+          "name": "Токен — ilya",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"ilya\",\n  \"password\": \"password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Мок Keycloak в API Gateway: выдаёт JWT демо-пользователю (пароль у всех password)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// случайная дата через 3–300 дней: каждый прогон коллекции бронирует свободные интервалы",
+                  "const d = new Date(Date.now() + (3 + Math.floor(Math.random() * 298)) * 86400000);",
+                  "pm.collectionVariables.set('demoDate', d.toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.collectionVariables.set(\"tokenIlya\", pm.response.json().access_token);",
+                  "pm.collectionVariables.set(\"tokenIlyaExp\", String(Date.now() + pm.response.json().expires_in * 1000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Токен — anna",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"anna\",\n  \"password\": \"password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Мок Keycloak в API Gateway: выдаёт JWT демо-пользователю (пароль у всех password)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.collectionVariables.set(\"tokenAnna\", pm.response.json().access_token);",
+                  "pm.collectionVariables.set(\"tokenAnnaExp\", String(Date.now() + pm.response.json().expires_in * 1000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Токен — manager",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"manager\",\n  \"password\": \"password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Мок Keycloak в API Gateway: выдаёт JWT демо-пользователю (пароль у всех password)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.collectionVariables.set(\"tokenManager\", pm.response.json().access_token);",
+                  "pm.collectionVariables.set(\"tokenManagerExp\", String(Date.now() + pm.response.json().expires_in * 1000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Каталог",
+      "description": "Публичные запросы без токена: площадки, комнаты, занятость, оборудование.",
+      "item": [
+        {
+          "name": "Площадки в городе",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/venues?city=Ростов-на-Дону",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "venues"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "Ростов-на-Дону"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"есть демо-площадки\", () => { if (!(pm.response.json().items.length >= 2)) throw new Error(\"Ожидалось: есть демо-площадки\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Площадка «Гараж 61»",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/venues/{{venueGarage}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "venues",
+                "{{venueGarage}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Комнаты площадки",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/venues/{{venueGarage}}/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "venues",
+                "{{venueGarage}}",
+                "rooms"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Занятость комнаты на дату",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/occupancy/rooms/{{roomRed}}?date={{demoDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "occupancy",
+                "rooms",
+                "{{roomRed}}"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{demoDate}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Свободное оборудование на интервал",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/equipment-availability?venueId={{venueGarage}}&startsAt={{demoDate}}T18:00:00%2B03:00&endsAt={{demoDate}}T20:00:00%2B03:00",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "equipment-availability"
+              ],
+              "query": [
+                {
+                  "key": "venueId",
+                  "value": "{{venueGarage}}"
+                },
+                {
+                  "key": "startsAt",
+                  "value": "{{demoDate}}T18:00:00%2B03:00"
+                },
+                {
+                  "key": "endsAt",
+                  "value": "{{demoDate}}T20:00:00%2B03:00"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"гитара свободна\", () => { if (!(pm.response.json().items.find(i => i.itemId === pm.collectionVariables.get('itemStrat')).availableQuantity === 1)) throw new Error(\"Ожидалось: гитара свободна\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Успешный сценарий (happy path)",
+      "description": "booking → venue (quote) → equipment (резерв) → payment (платёж в ЮKassa-моке) → webhook оплаты → события payment.completed и booking.confirmed → письмо в Mailpit.",
+      "item": [
+        {
+          "name": "Создать бронь с гитарой",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomRed}}\",\n  \"startsAt\": \"{{demoDate}}T18:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T20:00:00+03:00\",\n  \"equipment\": [\n    {\n      \"itemId\": \"{{itemStrat}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 201\", () => { if (!(pm.response.code === 201)) throw new Error(\"Ожидалось: код ответа 201\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"бронь ждёт оплаты\", () => { if (!(pm.response.json().status === 'PENDING_PAYMENT')) throw new Error(\"Ожидалось: бронь ждёт оплаты\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"1400 ₽ за комнату + 600 ₽ за гитару\", () => { if (!(pm.response.json().totalPrice === 2000)) throw new Error(\"Ожидалось: 1400 ₽ за комнату + 600 ₽ за гитару\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.collectionVariables.set(\"happyBookingId\", pm.response.json().id);",
+                  "pm.collectionVariables.set(\"happyPaymentId\", pm.response.json().paymentId);",
+                  "pm.collectionVariables.set(\"happyProviderId\", pm.response.json().paymentUrl.split('orderId=')[1]);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Страница оплаты (мок ЮKassa)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wiremockUrl}}/checkout?orderId={{happyProviderId}}",
+              "host": [
+                "{{wiremockUrl}}"
+              ],
+              "path": [
+                "checkout"
+              ],
+              "query": [
+                {
+                  "key": "orderId",
+                  "value": "{{happyProviderId}}"
+                }
+              ]
+            },
+            "description": "Ссылка paymentUrl из ответа на создание брони. Это заглушка WireMock — оплату имитирует следующий запрос."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплата прошла (webhook ЮKassa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/webhooks/yookassa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "webhooks",
+                "yookassa"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"notification\",\n  \"event\": \"payment.succeeded\",\n  \"object\": {\n    \"id\": \"{{happyProviderId}}\",\n    \"status\": \"succeeded\",\n    \"amount\": {\n      \"value\": \"2000.00\",\n      \"currency\": \"RUB\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Имитация уведомления платёжного шлюза. В реальной системе его отправляет ЮKassa."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Бронь подтверждена",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{happyBookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{happyBookingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// события обрабатываются асинхронно через RabbitMQ — даём им пару секунд",
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус CONFIRMED\", () => { if (!(pm.response.json().status === 'CONFIRMED')) throw new Error(\"Ожидалось: статус CONFIRMED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Платёж оплачен",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{happyPaymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{happyPaymentId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус SUCCEEDED\", () => { if (!(pm.response.json().status === 'SUCCEEDED')) throw new Error(\"Ожидалось: статус SUCCEEDED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Гитара занята на это время",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/equipment-availability?venueId={{venueGarage}}&startsAt={{demoDate}}T18:00:00%2B03:00&endsAt={{demoDate}}T20:00:00%2B03:00",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "equipment-availability"
+              ],
+              "query": [
+                {
+                  "key": "venueId",
+                  "value": "{{venueGarage}}"
+                },
+                {
+                  "key": "startsAt",
+                  "value": "{{demoDate}}T18:00:00%2B03:00"
+                },
+                {
+                  "key": "endsAt",
+                  "value": "{{demoDate}}T20:00:00%2B03:00"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"гитара зарезервирована\", () => { if (!(pm.response.json().items.find(i => i.itemId === pm.collectionVariables.get('itemStrat')).availableQuantity === 0)) throw new Error(\"Ожидалось: гитара зарезервирована\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Уведомления пользователя",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"письмо о подтверждении отправлено\", () => { if (!(pm.response.json().items.some(n => n.type === 'BOOKING_CONFIRMED' && n.status === 'SENT'))) throw new Error(\"Ожидалось: письмо о подтверждении отправлено\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Сбой: оплата отклонена",
+      "description": "Шлюз отклоняет оплату → payment.failed → booking-service отменяет бронь (компенсация) → booking.cancelled → equipment-service снимает резерв (компенсация) → письмо об отмене.",
+      "item": [
+        {
+          "name": "Создать бронь с гитарой",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomRed}}\",\n  \"startsAt\": \"{{demoDate}}T12:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T14:00:00+03:00\",\n  \"equipment\": [\n    {\n      \"itemId\": \"{{itemStrat}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 201\", () => { if (!(pm.response.code === 201)) throw new Error(\"Ожидалось: код ответа 201\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.collectionVariables.set(\"declinedBookingId\", pm.response.json().id);",
+                  "pm.collectionVariables.set(\"declinedPaymentId\", pm.response.json().paymentId);",
+                  "pm.collectionVariables.set(\"declinedProviderId\", pm.response.json().paymentUrl.split('orderId=')[1]);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Оплата отклонена (webhook ЮKassa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/webhooks/yookassa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "webhooks",
+                "yookassa"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"notification\",\n  \"event\": \"payment.canceled\",\n  \"object\": {\n    \"id\": \"{{declinedProviderId}}\",\n    \"status\": \"canceled\",\n    \"amount\": {\n      \"value\": \"2000.00\",\n      \"currency\": \"RUB\"\n    },\n    \"cancellation_details\": {\n      \"party\": \"payment_network\",\n      \"reason\": \"general_decline\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Бронь отменена",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{declinedBookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{declinedBookingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// события обрабатываются асинхронно через RabbitMQ — даём им пару секунд",
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус CANCELLED\", () => { if (!(pm.response.json().status === 'CANCELLED')) throw new Error(\"Ожидалось: статус CANCELLED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"причина PAYMENT_FAILED\", () => { if (!(pm.response.json().cancelReason === 'PAYMENT_FAILED')) throw new Error(\"Ожидалось: причина PAYMENT_FAILED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Платёж отклонён",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{declinedPaymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{declinedPaymentId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус FAILED\", () => { if (!(pm.response.json().status === 'FAILED')) throw new Error(\"Ожидалось: статус FAILED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Гитара снова свободна",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/equipment-availability?venueId={{venueGarage}}&startsAt={{demoDate}}T12:00:00%2B03:00&endsAt={{demoDate}}T14:00:00%2B03:00",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "equipment-availability"
+              ],
+              "query": [
+                {
+                  "key": "venueId",
+                  "value": "{{venueGarage}}"
+                },
+                {
+                  "key": "startsAt",
+                  "value": "{{demoDate}}T12:00:00%2B03:00"
+                },
+                {
+                  "key": "endsAt",
+                  "value": "{{demoDate}}T14:00:00%2B03:00"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"резерв снят\", () => { if (!(pm.response.json().items.find(i => i.itemId === pm.collectionVariables.get('itemStrat')).availableQuantity === 1)) throw new Error(\"Ожидалось: резерв снят\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Сбой: нет оборудования",
+      "description": "Анна заняла гитару, бронь Ильи на то же время откатывается синхронно: equipment-service отвечает 409, booking-service отменяет свою бронь, платёж не создаётся.",
+      "item": [
+        {
+          "name": "Анна бронирует «Синюю» с гитарой",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAnna}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomBlue}}\",\n  \"startsAt\": \"{{demoDate}}T20:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T22:00:00+03:00\",\n  \"equipment\": [\n    {\n      \"itemId\": \"{{itemStrat}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 201\", () => { if (!(pm.response.code === 201)) throw new Error(\"Ожидалось: код ответа 201\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Илья бронирует «Красную» с той же гитарой",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomRed}}\",\n  \"startsAt\": \"{{demoDate}}T20:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T22:00:00+03:00\",\n  \"equipment\": [\n    {\n      \"itemId\": \"{{itemStrat}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 409\", () => { if (!(pm.response.code === 409)) throw new Error(\"Ожидалось: код ответа 409\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код EQUIPMENT_UNAVAILABLE\", () => { if (!(pm.response.json().code === 'EQUIPMENT_UNAVAILABLE')) throw new Error(\"Ожидалось: код EQUIPMENT_UNAVAILABLE\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"ответ в формате Problem Details\", () => { if (!(pm.response.headers.get('Content-Type').startsWith('application/problem+json'))) throw new Error(\"Ожидалось: ответ в формате Problem Details\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Бронь Ильи отменена",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings?status=CANCELLED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "CANCELLED"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"отменённая бронь с причиной EQUIPMENT_UNAVAILABLE\", () => { if (!(pm.response.json().items.some(b => b.cancelReason === 'EQUIPMENT_UNAVAILABLE'))) throw new Error(\"Ожидалось: отменённая бронь с причиной EQUIPMENT_UNAVAILABLE\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Отмена с возвратом денег",
+      "description": "Отмена оплаченной брони больше чем за 24 часа: booking.cancelled (резерв снимается) и команда payment.refund → возврат в ЮKassa-моке → payment.refunded → письмо.",
+      "item": [
+        {
+          "name": "Отменить бронь из сценария 2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{happyBookingId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{happyBookingId}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Перенесли репетицию\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"причина USER_REQUEST\", () => { if (!(pm.response.json().cancelReason === 'USER_REQUEST')) throw new Error(\"Ожидалось: причина USER_REQUEST\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Деньги возвращены",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{happyPaymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{happyPaymentId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// события обрабатываются асинхронно через RabbitMQ — даём им пару секунд",
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус REFUNDED\", () => { if (!(pm.response.json().status === 'REFUNDED')) throw new Error(\"Ожидалось: статус REFUNDED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"возвращено 2000 ₽\", () => { if (!(pm.response.json().refundedAmount === 2000)) throw new Error(\"Ожидалось: возвращено 2000 ₽\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Повторная отмена",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{happyBookingId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{happyBookingId}}",
+                "cancel"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 409\", () => { if (!(pm.response.code === 409)) throw new Error(\"Ожидалось: код ответа 409\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код BOOKING_NOT_CANCELLABLE\", () => { if (!(pm.response.json().code === 'BOOKING_NOT_CANCELLABLE')) throw new Error(\"Ожидалось: код BOOKING_NOT_CANCELLABLE\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Идемпотентность",
+      "description": "Повтор POST с тем же Idempotency-Key возвращает тот же результат и не создаёт дубль.",
+      "item": [
+        {
+          "name": "Создать бронь (ключ K)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomBlue}}\",\n  \"startsAt\": \"{{demoDate}}T14:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T16:00:00+03:00\",\n  \"equipment\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idemKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 201\", () => { if (!(pm.response.code === 201)) throw new Error(\"Ожидалось: код ответа 201\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.collectionVariables.set(\"idemBookingId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Повтор с тем же ключом K",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomBlue}}\",\n  \"startsAt\": \"{{demoDate}}T14:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T16:00:00+03:00\",\n  \"equipment\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 201\", () => { if (!(pm.response.code === 201)) throw new Error(\"Ожидалось: код ответа 201\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"та же бронь\", () => { if (!(pm.response.json().id === pm.collectionVariables.get('idemBookingId'))) throw new Error(\"Ожидалось: та же бронь\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"заголовок Idempotent-Replayed\", () => { if (!(pm.response.headers.get('Idempotent-Replayed') === 'true')) throw new Error(\"Ожидалось: заголовок Idempotent-Replayed\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ключ K с другим телом",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomBlue}}\",\n  \"startsAt\": \"{{demoDate}}T16:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T18:00:00+03:00\",\n  \"equipment\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 422\", () => { if (!(pm.response.code === 422)) throw new Error(\"Ожидалось: код ответа 422\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код IDEMPOTENCY_KEY_REUSED\", () => { if (!(pm.response.json().code === 'IDEMPOTENCY_KEY_REUSED')) throw new Error(\"Ожидалось: код IDEMPOTENCY_KEY_REUSED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Без Idempotency-Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomBlue}}\",\n  \"startsAt\": \"{{demoDate}}T16:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T18:00:00+03:00\",\n  \"equipment\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 400\", () => { if (!(pm.response.code === 400)) throw new Error(\"Ожидалось: код ответа 400\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код IDEMPOTENCY_KEY_REQUIRED\", () => { if (!(pm.response.json().code === 'IDEMPOTENCY_KEY_REQUIRED')) throw new Error(\"Ожидалось: код IDEMPOTENCY_KEY_REQUIRED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Gateway и единая модель ошибок",
+      "description": "Все ошибки — application/problem+json с полями type, title, status, code, detail, traceId.",
+      "item": [
+        {
+          "name": "Внутренний API снаружи недоступен",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/internal/v1/rooms/{{roomRed}}/quote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "internal",
+                "v1",
+                "rooms",
+                "{{roomRed}}",
+                "quote"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 404\", () => { if (!(pm.response.code === 404)) throw new Error(\"Ожидалось: код ответа 404\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Без токена",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 401\", () => { if (!(pm.response.code === 401)) throw new Error(\"Ожидалось: код ответа 401\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код UNAUTHORIZED\", () => { if (!(pm.response.json().code === 'UNAUTHORIZED')) throw new Error(\"Ожидалось: код UNAUTHORIZED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ошибка валидации",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomRed}}\",\n  \"startsAt\": \"завтра\",\n  \"endsAt\": \"{{demoDate}}T20:00:00+03:00\",\n  \"equipment\": [\n    {\n      \"itemId\": \"{{itemSm58}}\",\n      \"quantity\": 0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 400\", () => { if (!(pm.response.code === 400)) throw new Error(\"Ожидалось: код ответа 400\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"две ошибки по полям\", () => { if (!(pm.response.json().errors.length === 2)) throw new Error(\"Ожидалось: две ошибки по полям\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Вне часов работы",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomRed}}\",\n  \"startsAt\": \"{{demoDate}}T07:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T09:00:00+03:00\",\n  \"equipment\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 422\", () => { if (!(pm.response.code === 422)) throw new Error(\"Ожидалось: код ответа 422\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код BUSINESS_RULE_VIOLATION\", () => { if (!(pm.response.json().code === 'BUSINESS_RULE_VIOLATION')) throw new Error(\"Ожидалось: код BUSINESS_RULE_VIOLATION\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Интервал уже занят",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAnna}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomBlue}}\",\n  \"startsAt\": \"{{demoDate}}T14:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T16:00:00+03:00\",\n  \"equipment\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 409\", () => { if (!(pm.response.code === 409)) throw new Error(\"Ожидалось: код ответа 409\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код SLOT_ALREADY_TAKEN\", () => { if (!(pm.response.json().code === 'SLOT_ALREADY_TAKEN')) throw new Error(\"Ожидалось: код SLOT_ALREADY_TAKEN\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Чужая бронь",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAnna}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{idemBookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{idemBookingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 403\", () => { if (!(pm.response.code === 403)) throw new Error(\"Ожидалось: код ответа 403\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Менеджер видит брони своей площадки",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenManager}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings?venueId={{venueGarage}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "venueId",
+                  "value": "{{venueGarage}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"есть брони площадки\", () => { if (!(pm.response.json().page.totalElements >= 1)) throw new Error(\"Ожидалось: есть брони площадки\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "8. Ручной сценарий: payment-service недоступен",
+      "description": "Перед запуском выполните в терминале: docker compose stop payment-service. booking-service не может создать платёж и отменяет бронь; событие booking.cancelled снимает резерв гитары. После проверки: docker compose start payment-service.",
+      "item": [
+        {
+          "name": "Создать бронь при выключенном payment-service",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomRed}}\",\n  \"startsAt\": \"{{demoDate}}T10:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T12:00:00+03:00\",\n  \"equipment\": [\n    {\n      \"itemId\": \"{{itemStrat}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 503\", () => { if (!(pm.response.code === 503)) throw new Error(\"Ожидалось: код ответа 503\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"код SERVICE_UNAVAILABLE\", () => { if (!(pm.response.json().code === 'SERVICE_UNAVAILABLE')) throw new Error(\"Ожидалось: код SERVICE_UNAVAILABLE\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Бронь отменена с причиной PAYMENT_UNAVAILABLE",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings?status=CANCELLED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "CANCELLED"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// события обрабатываются асинхронно через RabbitMQ — даём им пару секунд",
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"есть бронь с причиной PAYMENT_UNAVAILABLE\", () => { if (!(pm.response.json().items.some(b => b.cancelReason === 'PAYMENT_UNAVAILABLE'))) throw new Error(\"Ожидалось: есть бронь с причиной PAYMENT_UNAVAILABLE\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Гитара свободна (резерв снят)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/equipment-availability?venueId={{venueGarage}}&startsAt={{demoDate}}T10:00:00%2B03:00&endsAt={{demoDate}}T12:00:00%2B03:00",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "equipment-availability"
+              ],
+              "query": [
+                {
+                  "key": "venueId",
+                  "value": "{{venueGarage}}"
+                },
+                {
+                  "key": "startsAt",
+                  "value": "{{demoDate}}T10:00:00%2B03:00"
+                },
+                {
+                  "key": "endsAt",
+                  "value": "{{demoDate}}T12:00:00%2B03:00"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"резерв снят\", () => { if (!(pm.response.json().items.find(i => i.itemId === pm.collectionVariables.get('itemStrat')).availableQuantity === 1)) throw new Error(\"Ожидалось: резерв снят\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9. Ручной сценарий: бронь истекла, оплата пришла поздно",
+      "description": "Перед запуском перезапустите booking-service с коротким удержанием: BOOKING_HOLD_SECONDS=30 docker compose up -d booking-service. Запустите первый запрос, подождите 40 секунд и запустите остальные.",
+      "item": [
+        {
+          "name": "Создать бронь",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roomId\": \"{{roomBlue}}\",\n  \"startsAt\": \"{{demoDate}}T18:00:00+03:00\",\n  \"endsAt\": \"{{demoDate}}T20:00:00+03:00\",\n  \"equipment\": [\n    {\n      \"itemId\": \"{{itemSm58}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 201\", () => { if (!(pm.response.code === 201)) throw new Error(\"Ожидалось: код ответа 201\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.collectionVariables.set(\"lateBookingId\", pm.response.json().id);",
+                  "pm.collectionVariables.set(\"latePaymentId\", pm.response.json().paymentId);",
+                  "pm.collectionVariables.set(\"lateProviderId\", pm.response.json().paymentUrl.split('orderId=')[1]);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Бронь истекла (через 40 с)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{lateBookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{lateBookingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус EXPIRED\", () => { if (!(pm.response.json().status === 'EXPIRED')) throw new Error(\"Ожидалось: статус EXPIRED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Платёж отменён",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{latePaymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{latePaymentId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус CANCELLED\", () => { if (!(pm.response.json().status === 'CANCELLED')) throw new Error(\"Ожидалось: статус CANCELLED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Поздняя оплата (webhook ЮKassa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/webhooks/yookassa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "webhooks",
+                "yookassa"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"notification\",\n  \"event\": \"payment.succeeded\",\n  \"object\": {\n    \"id\": \"{{lateProviderId}}\",\n    \"status\": \"succeeded\",\n    \"amount\": {\n      \"value\": \"2000.00\",\n      \"currency\": \"RUB\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Деньги возвращены автоматически",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenIlya}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{latePaymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{latePaymentId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// события обрабатываются асинхронно через RabbitMQ — даём им пару секунд",
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"код ответа 200\", () => { if (!(pm.response.code === 200)) throw new Error(\"Ожидалось: код ответа 200\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });",
+                  "pm.test(\"статус REFUNDED\", () => { if (!(pm.response.json().status === 'REFUNDED')) throw new Error(\"Ожидалось: статус REFUNDED\" + ' | код ' + pm.response.code + ' | ' + pm.response.text().slice(0, 300)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

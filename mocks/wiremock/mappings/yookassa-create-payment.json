@@ -1,0 +1,40 @@
+{
+  "name": "ЮKassa: создать платёж",
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v3/payments",
+    "basicAuthCredentials": { "username": "123456", "password": "test_secret" },
+    "headers": {
+      "Idempotence-Key": { "matches": ".+" },
+      "Content-Type": { "contains": "application/json" }
+    },
+    "bodyPatterns": [
+      { "matchesJsonPath": "$.amount.value" },
+      { "matchesJsonPath": "$.confirmation.return_url" },
+      { "matchesJsonPath": "$.metadata.paymentId" },
+      { "matchesJsonPath": "$.metadata.bookingId" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "id": "yk-{{jsonPath request.body '$.metadata.paymentId'}}",
+      "status": "pending",
+      "paid": false,
+      "amount": { "value": "{{jsonPath request.body '$.amount.value'}}", "currency": "RUB" },
+      "confirmation": {
+        "type": "redirect",
+        "confirmation_url": "http://localhost:8089/checkout?orderId=yk-{{jsonPath request.body '$.metadata.paymentId'}}"
+      },
+      "created_at": "{{now}}",
+      "metadata": {
+        "paymentId": "{{jsonPath request.body '$.metadata.paymentId'}}",
+        "bookingId": "{{jsonPath request.body '$.metadata.bookingId'}}"
+      },
+      "test": true
+    },
+    "transformers": ["response-template"]
+  }
+}

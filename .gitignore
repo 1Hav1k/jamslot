@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+.vscode/
+*.bkp
+*.dtmp
+.$*
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+*.db
+*.db-wal
+*.db-shm
+.pytest_cache/

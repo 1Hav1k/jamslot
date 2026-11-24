@@ -1,0 +1,14 @@
+{
+  "name": "ЮKassa: неверные учётные данные магазина или неизвестный запрос",
+  "priority": 10,
+  "request": { "method": "ANY", "urlPathPattern": "/v3/.*" },
+  "response": {
+    "status": 401,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "type": "error",
+      "code": "invalid_credentials",
+      "description": "Мок ЮKassa: запрос не совпал с контрактом (проверьте авторизацию, заголовки и тело)"
+    }
+  }
+}
