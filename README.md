@@ -1,16 +1,169 @@
 # JamSlot — бронирование репетиционных комнат и студий
 
+Сервис для музыкантов: найти репетиционную базу, забронировать комнату на несколько часов, взять в аренду оборудование и оплатить всё одним платежом.
+
+- **ЛР3 «Декомпозиция и проектирование микросервисной системы»** — предметная область, границы сервисов, схемы, контракты API (вторая часть этого файла).
+- **ЛР4 «Реализация микросервисов»** — пять сервисов, API Gateway, docker-compose, моки, тесты (первая часть).
+
 | Что | Где |
 |---|---|
-| Отчёт по шагам 1–4 | `README.md` |
-| Исходник схем (4 страницы) | [`docs/architecture.drawio`](docs/architecture.drawio) |
-| Архитектурная схема | [`docs/architecture.png`](docs/architecture.png) |
-| Диаграммы последовательности | [`docs/sequence-success.png`](docs/sequence-success.png), [`docs/sequence-failure-payment.png`](docs/sequence-failure-payment.png), [`docs/sequence-failure-expired.png`](docs/sequence-failure-expired.png) |
-| OpenAPI, по файлу на сервис | [`api/`](api/) |
-| AsyncAPI для событий и команд | [`api/asyncapi.yaml`](api/asyncapi.yaml) |
-
+| Исходный код сервисов | [`services/`](services/) |
+| Локальный запуск | [`docker-compose.yml`](docker-compose.yml) |
+| Моки внешних систем (WireMock) | [`mocks/wiremock/`](mocks/wiremock/) |
+| Коллекция запросов | [`postman/JamSlot.postman_collection.json`](postman/JamSlot.postman_collection.json) |
+| Проверенные сценарии | [`docs/demo-scenarios.md`](docs/demo-scenarios.md) |
+| Тесты | [`tests/`](tests/) |
+| Схемы ЛР3 | [`docs/`](docs/) |
+| OpenAPI и AsyncAPI ЛР3 | [`api/`](api/) |
 
 ---
+
+# ЛР4. Реализация микросервисов
+
+## Соответствие минимальным требованиям
+
+| Требование ЛР4 | Как выполнено |
+|---|---|
+| Не менее 4 бизнес-сервисов из ЛР3 | 5: venue, booking, equipment, payment, notification |
+| Своё хранилище у каждого сервиса | своя база PostgreSQL и своя учётная запись на сервис ([`infra/postgres/init.sql`](infra/postgres/init.sql)); в тестах — свой файл SQLite |
+| Не менее 3 синхронных взаимодействий по контрактам | 3 REST-вызова: booking → venue, booking → equipment, booking → payment |
+| Не менее 2 асинхронных взаимодействий через брокер | 8 типов сообщений (7 событий и команда `payment.refund`) через RabbitMQ, 7 очередей-подписок в 5 сервисах |
+| Сквозной сценарий на 3+ сервиса с обработкой сбоев | сага бронирования: venue → booking → equipment → payment → notification, компенсации при отказе оплаты, нехватке оборудования, недоступности сервиса и истечении брони |
+| Клиент обращается только через API Gateway | Gateway на `:8000` — единственный опубликованный порт сервисов; `/internal/**` наружу закрыт |
+| `Idempotency-Key` для повторяемых операций | все `POST`, создающие или меняющие данные, включая внутренние вызовы саги |
+| Единая модель ошибок | Problem Details (RFC 9457 / 7807) во всех сервисах и в Gateway |
+| Docker Compose | поднимает 5 сервисов, Gateway, PostgreSQL, RabbitMQ, WireMock и Mailpit |
+| Unit- и интеграционные тесты | 74 теста: бизнес-правила, библиотека, эндпоинты, сквозные сценарии со сбоями |
+
+## Реализованные сервисы
+
+| Сервис | Публичный API (через Gateway) | Внутренний API | Публикует | Подписан на |
+|---|---|---|---|---|
+| **venue-service** | площадки и комнаты: 9 операций | `GET /internal/v1/rooms/{id}/quote` | — | `review.published`, `review.removed` |
+| **booking-service** | брони, отмена, занятость комнаты | — | `booking.confirmed`, `booking.cancelled`, `booking.expired`, `booking.completed`, команда `payment.refund` | `payment.completed`, `payment.failed` |
+| **equipment-service** | прокатный фонд, доступность на интервал | `POST /internal/v1/reservations`, `GET /internal/v1/reservations/{id}` | — | `booking.confirmed`, `booking.cancelled`, `booking.expired` |
+| **payment-service** | платежи, webhook ЮKassa | `POST /internal/v1/payments` | `payment.completed`, `payment.failed`, `payment.refunded` | `booking.cancelled`, `booking.expired`, команда `payment.refund` |
+| **notification-service** | история уведомлений, настройки | — | — | `booking.*`, `payment.refunded` |
+| **api-gateway** | `/auth/token` (мок Keycloak), прокси `/api/v1/**` | — | — | — |
+
+Все 28 операций из OpenAPI этих сервисов реализованы. Тест `test_every_operation_of_implemented_services_is_exercised` вызывает каждую и сверяет список с `api/*.yaml`. **review-service не реализован** (минимум ЛР4 — четыре сервиса). Его событие `review.published` venue-service уже обрабатывает — это проверено тестом.
+
+## Шаг 1. Выбор стека
+
+| Компонент | Выбор | Почему |
+|---|---|---|
+| Язык и фреймворк | Python 3.13 + Flask 3 | Один стек на все сервисы: общий код (outbox, идемпотентность, Problem Details) пишется один раз. Flask — тонкий синхронный фреймворк без магии: в коде видно, где транзакция, где вызов соседа и где публикация события. Для курса, где главное — взаимодействия, это важнее скорости |
+| Валидация | pydantic 2 | Схемы запросов повторяют `components/schemas` из OpenAPI, ошибки превращаются в `400` со списком полей |
+| WSGI-сервер | gunicorn, 1 процесс × 8 потоков | Фоновые потоки (outbox, подписки, планировщик) живут в одном процессе с API |
+| БД | PostgreSQL 17 через psycopg 3 | Как в ЛР3: пересечение интервалов брони запрещает ограничение `EXCLUDE USING gist`. Код запросов общий для PostgreSQL и SQLite, поэтому тесты идут без Docker |
+| Брокер | RabbitMQ 4 через pika | Как в ЛР3: topic-exchange для событий, direct-exchange для команды |
+| HTTP между сервисами | requests | Таймаут, один повтор для безопасных запросов, circuit breaker |
+| Тесты | pytest + jsonschema | Ответы, внутренние запросы и события сверяются с OpenAPI/AsyncAPI ЛР3 |
+
+## Что работает через реальные сервисы, а что через моки
+
+| Взаимодействие | Реализация |
+|---|---|
+| Клиент → Gateway → сервисы | реально |
+| booking → venue, booking → equipment, booking → payment (REST) | реально |
+| Все события и команды (RabbitMQ) | реально |
+| Хранилища (PostgreSQL) | реально |
+| payment → ЮKassa: создание, отмена платежа, возврат | **мок: WireMock** ([`mocks/wiremock/mappings`](mocks/wiremock/mappings)). Стабы проверяют контракт: Basic-авторизацию магазина, `Idempotence-Key`, обязательные поля тела; иначе отвечают `401` |
+| ЮKassa → payment: уведомление об оплате | **мок:** webhook отправляется из Postman |
+| notification → почта | **мок: Mailpit** (SMTP + веб-интерфейс) |
+| Keycloak | **мок:** `POST /auth/token` в Gateway выдаёт подписанный JWT демо-пользователям |
+| review-service | не реализован; venue-service обрабатывает его события, если они приходят |
+
+В автотестах те же сервисы собираются в одном процессе: брокер — `InMemoryBroker` с маршрутизацией как у RabbitMQ, ЮKassa — эмулятор, который читает **те же** стабы из `mocks/wiremock`. Подробнее — [`docs/demo-scenarios.md`](docs/demo-scenarios.md).
+
+## Отличия от проекта ЛР3
+
+| В ЛР3 | В ЛР4 | Причина |
+|---|---|---|
+| Kong Gateway | минимальный Gateway на Flask | ЛР4 разрешает минимальную реализацию; в Gateway в одном месте маршрутизация, проверка JWT, лимит запросов и мок Keycloak |
+| Keycloak | мок выдачи токенов в Gateway | Разрешено условием; формат токена тот же (`sub`, `roles`, `venue_ids`) |
+| Токены сервисных учётных записей на `/internal/**` | доверие внутренней сети + заголовок `X-Service-Name` | `/internal/**` закрыт на Gateway и не опубликован наружу |
+| Проверка IP-адреса ЮKassa на Gateway | не делается | Webhook приходит из Postman |
+| Redis-кэш каталога | не используется | Нагрузки нет, кэш не влияет на взаимодействия |
+| review-service | не реализован | Достаточно четырёх сервисов |
+
+## Запуск
+
+Нужен Docker Desktop. Все образы есть в сборке для Apple Silicon (arm64).
+
+```bash
+docker compose up -d --build     # первая сборка — несколько минут
+docker compose ps                # все сервисы в статусе healthy
+curl http://localhost:8000/api/v1/venues
+```
+
+| Адрес | Что там |
+|---|---|
+| http://localhost:8000 | API Gateway — единственная точка входа |
+| http://localhost:8025 | Mailpit — письма пользователям |
+| http://localhost:15672 | RabbitMQ (логин и пароль `jamslot`) |
+| http://localhost:8089/__admin/requests | WireMock — журнал запросов к мок-ЮKassa |
+| `localhost:5433` | PostgreSQL (`postgres` / `postgres`), базы `*_db` |
+
+Остановить: `docker compose down`. Удалить и данные: `docker compose down -v`.
+
+## Проверка сценариев
+
+1. Импортировать в Postman `postman/JamSlot.postman_collection.json`.
+2. Запустить папку «0. Подготовка», затем 1–7 — через Run folder или по одному запросу. Каждый запрос содержит проверки (вкладка Tests).
+3. Папки 8 и 9 требуют команд в терминале — они в описании папок и в [`docs/demo-scenarios.md`](docs/demo-scenarios.md).
+
+Без Postman — через Newman: `npx newman run postman/JamSlot.postman_collection.json --folder "0. Подготовка" --folder "2. Успешный сценарий (happy path)"`.
+
+## Тесты
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+```
+
+| Набор | Что проверяет |
+|---|---|
+| `tests/unit` (37) | правила интервалов и отмены, переходы статусов, деньги и время; идемпотентность, outbox, дедупликация событий, повторы и DLQ, HTTP-клиент с повтором и circuit breaker |
+| `tests/integration` (19) | эндпоинты через Gateway: права, валидация, пагинация, ошибки; ограничение `EXCLUDE` в PostgreSQL; покрытие всех операций OpenAPI |
+| `tests/e2e` (18) | сквозная сага: успешный путь и все сбои с компенсациями, идемпотентность, повторная доставка событий |
+
+Тесты не требуют Docker. Каждый ответ сервиса, каждый внутренний запрос и каждое опубликованное событие автоматически сверяются с `api/*.yaml` и `api/asyncapi.yaml`: расхождение с контрактом роняет тест. По умолчанию базы — SQLite; тот же набор проходит и на PostgreSQL 16.
+
+## Структура
+
+```
+services/
+  common/jamslot_common/   общий код: БД, брокер и outbox, идемпотентность, Problem Details, HTTP-клиент
+  gateway/                 API Gateway
+  venue-service/           каталог площадок
+  booking-service/         брони и оркестрация саги
+  equipment-service/       прокат оборудования
+  payment-service/         платежи и интеграция с ЮKassa
+  notification-service/    письма и напоминания
+  Dockerfile               общий образ, сервис выбирается build-аргументами
+infra/postgres/init.sql    базы и учётные записи сервисов
+mocks/wiremock/            стабы ЮKassa
+postman/                   коллекция сценариев
+tests/                     unit, integration, e2e и общая обвязка (support/)
+docs/demo-scenarios.md     описание проверенных сценариев
+```
+
+---
+
+# ЛР3. Декомпозиция и проектирование
+
+Соответствие минимальным требованиям:
+
+| Требование | Как выполнено |
+|---|---|
+| 4–7 бизнес-сервисов | 6: venue, booking, equipment, payment, review, notification |
+| ≥ 3 синхронных взаимодействий между сервисами | 3: booking → venue, booking → equipment, booking → payment (раздел 5.3, № 8–10) |
+| ≥ 2 асинхронных взаимодействий | 10 типов сообщений, 8 подписок (раздел 6) |
+| Сценарий на 3+ сервиса с согласованностью данных | сага бронирования: booking + equipment + payment (+ venue, notification), раздел 5.4 |
+| Своё хранилище у каждого сервиса | 6 отдельных баз PostgreSQL, общих таблиц нет |
+| Клиент ходит только через API Gateway | Kong; пути `/internal/**` наружу не опубликованы |
 
 ## 1. Предметная область
 

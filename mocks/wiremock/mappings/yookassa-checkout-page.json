@@ -1,0 +1,11 @@
+{
+  "name": "ЮKassa: страница оплаты (заглушка)",
+  "priority": 1,
+  "request": { "method": "GET", "urlPath": "/checkout" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "text/html; charset=utf-8" },
+    "bodyFileName": "checkout.html",
+    "transformers": ["response-template"]
+  }
+}

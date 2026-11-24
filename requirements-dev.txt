@@ -1,0 +1,5 @@
+# Зависимости для запуска тестов локально (Python 3.12+)
+-e services/common
+pytest==9.1.1
+PyYAML==6.0.3
+jsonschema==4.26.0

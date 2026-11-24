@@ -1,0 +1,29 @@
+{
+  "name": "ЮKassa: создать возврат",
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v3/refunds",
+    "basicAuthCredentials": { "username": "123456", "password": "test_secret" },
+    "headers": {
+      "Idempotence-Key": { "matches": ".+" },
+      "Content-Type": { "contains": "application/json" }
+    },
+    "bodyPatterns": [
+      { "matchesJsonPath": "$.payment_id" },
+      { "matchesJsonPath": "$.amount.value" }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "id": "rf-{{randomValue type='UUID'}}",
+      "status": "succeeded",
+      "payment_id": "{{jsonPath request.body '$.payment_id'}}",
+      "amount": { "value": "{{jsonPath request.body '$.amount.value'}}", "currency": "RUB" },
+      "created_at": "{{now}}"
+    },
+    "transformers": ["response-template"]
+  }
+}

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><title>Мок ЮKassa — оплата</title>
+<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:48px auto;line-height:1.5;color:#1f2937}
+code{background:#f3f4f6;padding:2px 6px;border-radius:4px}</style></head>
+<body>
+<h1>Тестовая страница оплаты</h1>
+<p>Это заглушка платёжного шлюза ЮKassa (WireMock). Настоящая оплата здесь не проводится.</p>
+<p>Идентификатор платежа у шлюза: <code>{{request.query.orderId}}</code></p>
+<p>Чтобы завершить сценарий, отправьте уведомление шлюза в API Gateway — запросы
+«Оплата прошла (webhook ЮKassa)» или «Оплата отклонена (webhook ЮKassa)» в Postman-коллекции.</p>
+</body>
+</html>
