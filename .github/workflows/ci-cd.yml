@@ -42,7 +42,7 @@ jobs:
       - name: Run integration tests
         run: pytest tests/integration -v --tb=short
 
-  # ---------- Этап 2: Сборка Docker-образов (валидация) ----------
+    # ---------- Этап 2: Сборка Docker-образов (валидация) ----------
   build-image:
     name: Build Docker image ${{ matrix.service }}
     runs-on: ubuntu-latest
@@ -58,7 +58,12 @@ jobs:
           - { service: api-gateway,          dir: gateway,              package: gateway }
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME_LC=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v3
+
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
@@ -69,7 +74,7 @@ jobs:
             PACKAGE=${{ matrix.package }}
           platforms: linux/arm64
           push: false
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:test
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}/${{ matrix.service }}:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -84,11 +89,16 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME_LC=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -100,8 +110,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/booking-service:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/booking-service:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}/booking-service:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}/booking-service:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
