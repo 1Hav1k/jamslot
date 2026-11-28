@@ -1,9 +1,11 @@
 # JamSlot — бронирование репетиционных комнат и студий
+![CI/CD](https://github.com/1Hav1k/jamslot/actions/workflows/ci-cd.yml/badge.svg)
 
 Сервис для музыкантов: найти репетиционную базу, забронировать комнату на несколько часов, взять в аренду оборудование и оплатить всё одним платежом.
 
 - **ЛР3 «Декомпозиция и проектирование микросервисной системы»** — предметная область, границы сервисов, схемы, контракты API (вторая часть этого файла).
 - **ЛР4 «Реализация микросервисов»** — пять сервисов, API Gateway, docker-compose, моки, тесты (первая часть).
+- **ЛР5 "CI/CD пайплайн"** — пайплайн непрерывной интеграции и доставки
 
 | Что | Где |
 |---|---|
@@ -18,7 +20,7 @@
 
 ---
 
-# ЛР4. Реализация микросервисов
+# Реализация микросервисов
 
 ## Соответствие минимальным требованиям
 
@@ -152,7 +154,7 @@ docs/demo-scenarios.md     описание проверенных сценар�
 
 ---
 
-# ЛР3. Декомпозиция и проектирование
+# Декомпозиция и проектирование
 
 Соответствие минимальным требованиям:
 
@@ -550,3 +552,74 @@ npx @asyncapi/cli@latest validate api/asyncapi.yaml
 ```
 
 Посмотреть файл можно в [Swagger Editor](https://editor.swagger.io/) (File → Import file) и в [AsyncAPI Studio](https://studio.asyncapi.com/).
+
+# CI/CD
+
+В проекте настроен пайплайн непрерывной интеграции и доставки на **GitHub Actions**.
+Конфигурация — [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml),
+подробное описание — [`docs/cicd.md`](docs/cicd.md).
+
+🔗 **Работающий пайплайн:** <https://github.com/1Hav1k/jamslot/actions/workflows/ci-cd.yml>
+
+### Что делает пайплайн
+
+| Этап | Действие |
+|------|----------|
+| **Test** | Матричный запуск unit- и integration-тестов для всех сервисов (`venue-service`, `booking-service`, `payment-service`, `equipment-service`, `notification-service`, `api-gateway`) |
+| **Build** | Сборка Docker-образа каждого сервиса из общего `Dockerfile` с build-arg `SERVICE_NAME` |
+| **Publish** | Публикация образа `booking-service` в GitHub Container Registry (GHCR) с тегами `latest` и `<sha>` — только при push в `main` |
+
+Триггеры: `push` в `main`/`master`/`lab5` и `pull_request` в `main`/`master`.
+Публикация образа (CD) выполняется **только после merge в основную ветку**.
+
+### Секреты
+
+Публикация в GHCR использует встроенный `GITHUB_TOKEN` с правами `packages: write`.
+Дополнительные секреты не требуются и в репозитории не хранятся.
+
+### Как проверить локально
+
+```bash
+# Зависимости
+pip install -r requirements-dev.txt
+
+# Тесты
+pytest tests/unit -v
+pytest tests/integration -v
+
+# Сборка образа одного сервиса
+docker build --build-arg SERVICE_NAME=booking-service -t booking-service:local .
+```
+
+### Как посмотреть результаты на GitHub
+
+1. Открыть вкладку **Actions** → workflow **CI/CD Pipeline**.
+2. Убедиться, что `test` и `build-image` зелёные.
+3. После merge в `main` — проверить, что `publish` выполнился и пакет
+   `booking-service` появился в разделе **Packages**.
+
+### Деплой в staging
+
+- **Платформа:** MacBook Air M1 (ARM64) с self-hosted GitHub Actions runner.
+- **Механизм:** `docker compose -f docker-compose.staging.yml up -d --build` прямо на машине разработчика.
+- **Метки раннера:** `self-hosted`, `macOS`, `ARM64`.
+- **Секреты:** не требуются — деплой выполняется локально.
+- **Запуск:** автоматически при push в `lab5` или вручную через **Actions → Run workflow**.
+- **Особенность:** образы собираются нативно под ARM64 (без эмуляции), поэтому сборка быстрая.
+
+#### Установка self-hosted runner
+
+1. **Settings → Actions → Runners → New self-hosted runner** → macOS / ARM64.
+2. Выполнить команды из UI (скачивание, распаковка, `./config.sh`).
+3. Установить как сервис: `./svc.sh install && ./svc.sh start`.
+4. Убедиться, что Docker Desktop запущен и в раннере отображается **Idle**.
+
+Подробнее — в [`docs/cicd.md`](docs/cicd.md).
+
+#### Как проверить staging-деплой
+
+1. Убедиться, что Mac включён, Docker Desktop запущен, раннер в статусе **Idle**.
+2. Сделать push в `lab5` или запустить workflow вручную.
+3. Во вкладке **Actions** дождаться зелёного джоба `deploy-staging`.
+4. На Mac проверить: `docker compose -f docker-compose.staging.yml ps`.
+5. Открыть в браузере `http://localhost:9000` (API Gateway) или `http://localhost:9000/health` — должен вернуться `200 OK`.
