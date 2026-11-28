@@ -142,7 +142,7 @@ docker build --build-arg SERVICE_NAME=booking-service -t booking-service:local .
 
 ### 6.1. Успешный прогон на PR / ветке `lab5`
 
-Вставить скриншот зелёного прогона `test` + `build-image`, где `publish` — skipped.
+![alt text](<Снимок экрана 2026-11-28 в 14.09.29.JPG>)
 
 Пояснение к скриншоту: CD-этап намеренно не выполняется на PR — образ публикуется
 только после merge в основную ветку.
@@ -157,7 +157,7 @@ docker build --build-arg SERVICE_NAME=booking-service -t booking-service:local .
 
 ### 6.4. Неуспешный прогон
 
-⚠️ Вставить скриншот красного прогона при падении теста.
+![alt text](<Снимок экрана 2026-11-28 в 14.17.20.JPG>)
 
 Как воспроизвести: временно добавить `assert False` в любой unit-тест, сделать
 коммит и push. Пайплайн упадёт на джобе `test`, а `build-image` и `publish`
@@ -244,12 +244,9 @@ GitHub Actions (облако)
 
 ### 7.8. Скриншоты деплоя
 
-⚠️ Вставить скриншот успешного джоба `deploy-staging` с логами
-`Verify Docker is available` и `Deploy staging stack`.
-
-⚠️ Вставить скриншот `docker compose ps` на Mac, показывающий запущенные контейнеры.
-
-⚠️ Вставить скриншот раздела **Settings → Actions → Runners** со статусом раннера **Idle**.
+![alt text](<Снимок экрана 2026-11-28 в 14.16.41.JPG>)
+![alt text](<Снимок экрана 2026-11-28 в 14.13.36.JPG>)
+![alt text](<Снимок экрана 2026-11-28 в 14.15.16.JPG>)
 
 ### 7.9. Порты staging
 
